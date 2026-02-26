@@ -20,7 +20,6 @@ import (
 	"github.com/containerd/containerd/v2/pkg/oci"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 
-	cgroupsv1 "github.com/containerd/cgroups/v3/cgroup1/stats"
 	cgroupsv2 "github.com/containerd/cgroups/v3/cgroup2/stats"
 	"github.com/containerd/errdefs"
 	typeurl "github.com/containerd/typeurl/v2"
@@ -155,36 +154,18 @@ func collectMetrics(ctx context.Context, task containerd.Task) cgroupMetrics {
 
 func parseCgroupMetrics(data typeurl.Any) cgroupMetrics {
 	var m cgroupMetrics
-	switch {
-	case typeurl.Is(data, (*cgroupsv1.Metrics)(nil)):
-		var v1 cgroupsv1.Metrics
-		if err := typeurl.UnmarshalTo(data, &v1); err != nil {
-			return m
-		}
-		if v1.CPU != nil && v1.CPU.Usage != nil {
-			m.cpuNanos = v1.CPU.Usage.Total
-		}
-		if v1.Memory != nil && v1.Memory.Usage != nil {
-			m.peakMemBytes = v1.Memory.Usage.Max
-		}
-		if v1.MemoryOomControl != nil && v1.MemoryOomControl.OomKill > 0 {
-			m.oomKillDetected = true
-		}
-
-	case typeurl.Is(data, (*cgroupsv2.Metrics)(nil)):
-		var v2 cgroupsv2.Metrics
-		if err := typeurl.UnmarshalTo(data, &v2); err != nil {
-			return m
-		}
-		if v2.CPU != nil {
-			m.cpuNanos = v2.CPU.UsageUsec * 1000
-		}
-		if v2.Memory != nil {
-			m.peakMemBytes = v2.Memory.MaxUsage
-		}
-		if v2.MemoryEvents != nil && v2.MemoryEvents.OomKill > 0 {
-			m.oomKillDetected = true
-		}
+	var v2 cgroupsv2.Metrics
+	if err := typeurl.UnmarshalTo(data, &v2); err != nil {
+		return m
+	}
+	if v2.CPU != nil {
+		m.cpuNanos = v2.CPU.UsageUsec * 1000
+	}
+	if v2.Memory != nil {
+		m.peakMemBytes = v2.Memory.MaxUsage
+	}
+	if v2.MemoryEvents != nil && v2.MemoryEvents.OomKill > 0 {
+		m.oomKillDetected = true
 	}
 	return m
 }
