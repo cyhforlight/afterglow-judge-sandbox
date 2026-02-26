@@ -1,0 +1,12 @@
+# build output
+/sandbox
+
+# compiled C/C++ binaries (no extension, alongside .cpp sources)
+testprograms/cpp/ok
+testprograms/cpp/tle
+testprograms/cpp/mle
+testprograms/cpp/ole
+testprograms/cpp/re
+
+# compiled Java JARs
+testprograms/java/*.jar

@@ -1,0 +1,512 @@
+package service
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"math/rand"
+	"runtime"
+	"strconv"
+	"sync"
+	"syscall"
+	"time"
+
+	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/pkg/cio"
+	"github.com/containerd/containerd/v2/pkg/namespaces"
+	"github.com/containerd/containerd/v2/pkg/oci"
+	specs "github.com/opencontainers/runtime-spec/specs-go"
+
+	cgroupsv1 "github.com/containerd/cgroups/v3/cgroup1/stats"
+	cgroupsv2 "github.com/containerd/cgroups/v3/cgroup2/stats"
+	"github.com/containerd/errdefs"
+	typeurl "github.com/containerd/typeurl/v2"
+
+	"afterglow-judge-sandbox/internal/model"
+)
+
+const (
+	defaultSocketPath = "/run/containerd/containerd.sock"
+	defaultNamespace  = "afterglow"
+
+	// Wall time is allowed to be this multiple of CPU time limit.
+	// Accounts for I/O waits, scheduling latency, container overhead, etc.
+	wallTimeMultiplier = 3
+
+	// Max tasks (threads + processes) in the container.
+	// 128 is plenty for JVM (~20 threads) while still blocking fork bombs.
+	pidsLimit = 128
+
+	// Safety cap for input file size to prevent host OOM from malicious inputs.
+	maxInputSize = 256 * 1024 * 1024 // 256 MB
+)
+
+// pickCPU randomly selects a CPU core for the container.  Each sandbox
+// is pinned to exactly one core (no multi-threading advantage), while
+// randomization spreads concurrent sandboxes across available cores.
+func pickCPU() string {
+	return strconv.Itoa(rand.Intn(runtime.NumCPU()))
+}
+
+// RunProfile describes how a specific language's program should be
+// executed inside a container.  All language differences are captured here
+// so the container lifecycle code stays language-agnostic.
+type RunProfile struct {
+	ImageRef    string                            // container image to pull
+	SandboxFile string                            // filename inside /sandbox (e.g. "program", "solution.py")
+	FileMode    os.FileMode                       // permissions for the copied file
+	BuildArgs   func(containerPath string) []string // build the process argv
+}
+
+func NativeRunProfile() RunProfile {
+	return RunProfile{
+		ImageRef:    "gcr.io/distroless/cc-debian12:latest",
+		SandboxFile: "program",
+		FileMode:    0755,
+		BuildArgs:   func(p string) []string { return []string{p} },
+	}
+}
+
+func PythonRunProfile() RunProfile {
+	return RunProfile{
+		ImageRef:    "gcr.io/distroless/python3-debian12:latest",
+		SandboxFile: "solution.py",
+		FileMode:    0644,
+		BuildArgs:   func(p string) []string { return []string{"python3", p} },
+	}
+}
+
+func JavaRunProfile() RunProfile {
+	return RunProfile{
+		ImageRef:    "gcr.io/distroless/java21-debian12:latest",
+		SandboxFile: "solution.jar",
+		FileMode:    0644,
+		BuildArgs:   func(p string) []string { return []string{"java", "-jar", p} },
+	}
+}
+
+type ContainerdRunner struct {
+	socketPath string
+	namespace  string
+	profile    RunProfile
+}
+
+func NewContainerdRunner(socketPath string, profile RunProfile) *ContainerdRunner {
+	if socketPath == "" {
+		socketPath = defaultSocketPath
+	}
+	return &ContainerdRunner{
+		socketPath: socketPath,
+		namespace:  defaultNamespace,
+		profile:    profile,
+	}
+}
+
+// ---------- container security ----------
+
+// sandboxSecurityOpts hardens the container for running untrusted code.
+//
+// The default OCI spec (from WithImageConfig) already creates isolated Linux
+// namespaces — including a network namespace with no interfaces — so the
+// container has no network access without any extra configuration.
+//
+// The options below further restrict what the process can do:
+//   - read-only rootfs: the process cannot modify the container image
+//   - writable /tmp (tmpfs): JVM and Python need temp space; size is bounded
+//     by the cgroup memory limit so it doesn't need a separate cap
+//   - single-core pinning: eliminates any multi-threading speed advantage
+//   - empty capability sets: no root-like powers at all
+//   - no_new_privileges: blocks setuid/setgid escalation
+//   - PID limit: caps the number of threads+processes to prevent fork bombs
+func sandboxSecurityOpts() oci.SpecOpts {
+	return oci.Compose(
+		oci.WithRootFSReadonly(),
+		oci.WithMounts([]specs.Mount{{
+			Destination: "/tmp",
+			Type:        "tmpfs",
+			Source:      "tmpfs",
+			Options:     []string{"nosuid", "nodev"},
+		}}),
+		oci.WithCPUs(pickCPU()),
+		oci.WithCapabilities([]string{}),
+		oci.WithNoNewPrivileges,
+		oci.WithPidsLimit(pidsLimit),
+	)
+}
+
+// ---------- cgroup metrics ----------
+
+type cgroupMetrics struct {
+	cpuNanos        uint64
+	peakMemBytes    uint64
+	oomKillDetected bool
+}
+
+func collectMetrics(ctx context.Context, task containerd.Task) cgroupMetrics {
+	metric, err := task.Metrics(ctx)
+	if err != nil {
+		return cgroupMetrics{}
+	}
+	return parseCgroupMetrics(metric.Data)
+}
+
+func parseCgroupMetrics(data typeurl.Any) cgroupMetrics {
+	var m cgroupMetrics
+	switch {
+	case typeurl.Is(data, (*cgroupsv1.Metrics)(nil)):
+		var v1 cgroupsv1.Metrics
+		if err := typeurl.UnmarshalTo(data, &v1); err != nil {
+			return m
+		}
+		if v1.CPU != nil && v1.CPU.Usage != nil {
+			m.cpuNanos = v1.CPU.Usage.Total
+		}
+		if v1.Memory != nil && v1.Memory.Usage != nil {
+			m.peakMemBytes = v1.Memory.Usage.Max
+		}
+		if v1.MemoryOomControl != nil && v1.MemoryOomControl.OomKill > 0 {
+			m.oomKillDetected = true
+		}
+
+	case typeurl.Is(data, (*cgroupsv2.Metrics)(nil)):
+		var v2 cgroupsv2.Metrics
+		if err := typeurl.UnmarshalTo(data, &v2); err != nil {
+			return m
+		}
+		if v2.CPU != nil {
+			m.cpuNanos = v2.CPU.UsageUsec * 1000
+		}
+		if v2.Memory != nil {
+			m.peakMemBytes = v2.Memory.MaxUsage
+		}
+		if v2.MemoryEvents != nil && v2.MemoryEvents.OomKill > 0 {
+			m.oomKillDetected = true
+		}
+	}
+	return m
+}
+
+// ---------- output limiter ----------
+
+// outputLimiter holds a shared byte budget for all associated limitedWriters.
+// When the combined output (stdout + stderr) exceeds the budget, the channel
+// is closed to signal OLE to the main event loop.
+type outputLimiter struct {
+	ch   chan struct{}
+	once sync.Once
+	mu   sync.Mutex
+	cap  int64
+	used int64
+}
+
+func newOutputLimiter(limit int64) *outputLimiter {
+	return &outputLimiter{ch: make(chan struct{}), cap: limit}
+}
+
+func (l *outputLimiter) signal() {
+	l.once.Do(func() { close(l.ch) })
+}
+
+// reserve atomically claims up to n bytes from the shared pool and returns
+// the number of bytes actually granted (may be less than n, or 0).
+func (l *outputLimiter) reserve(n int64) int64 {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	remaining := l.cap - l.used
+	if remaining <= 0 {
+		return 0
+	}
+	if n > remaining {
+		n = remaining
+	}
+	l.used += n
+	return n
+}
+
+// limitedWriter buffers output while drawing bytes from the shared
+// outputLimiter pool.  When the pool is exhausted, further writes are
+// silently discarded (so the pipe never stalls) and OLE is signalled.
+type limitedWriter struct {
+	mu         sync.Mutex
+	buf        bytes.Buffer
+	overflowed bool
+	limiter    *outputLimiter
+}
+
+func newLimitedWriter(limiter *outputLimiter) *limitedWriter {
+	return &limitedWriter{limiter: limiter}
+}
+
+func (w *limitedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	n := len(p)
+	if w.overflowed {
+		return n, nil
+	}
+	allowed := w.limiter.reserve(int64(n))
+	if allowed > 0 {
+		w.buf.Write(p[:allowed])
+	}
+	if allowed < int64(n) {
+		w.overflowed = true
+		w.limiter.signal()
+	}
+	return n, nil
+}
+
+func (w *limitedWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
+
+func (w *limitedWriter) isOverflowed() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.overflowed
+}
+
+// ---------- Execute ----------
+
+func (r *ContainerdRunner) Execute(ctx context.Context, req model.ExecuteRequest) (model.ExecuteResult, error) {
+	client, err := containerd.New(r.socketPath)
+	if err != nil {
+		return infraErr("connect to containerd: %v", err)
+	}
+	defer client.Close()
+
+	ctx = namespaces.WithNamespace(ctx, r.namespace)
+
+	image, err := r.ensureImage(ctx, client)
+	if err != nil {
+		return infraErr("ensure image: %v", err)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "sandbox-*")
+	if err != nil {
+		return infraErr("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if err := copyFile(req.ExecutablePath, filepath.Join(tmpDir, r.profile.SandboxFile), r.profile.FileMode); err != nil {
+		return infraErr("copy program file: %v", err)
+	}
+
+	id := fmt.Sprintf("sandbox-%d", time.Now().UnixNano())
+	containerPath := "/sandbox/" + r.profile.SandboxFile
+	args := r.profile.BuildArgs(containerPath)
+
+	outputLimitBytes := int64(req.MemoryLimit) * 1024 * 1024
+
+	container, err := client.NewContainer(ctx, id,
+		containerd.WithImage(image),
+		containerd.WithNewSnapshot(id+"-snap", image),
+		containerd.WithNewSpec(
+			oci.WithImageConfig(image),
+			oci.WithProcessArgs(args...),
+			oci.WithMounts([]specs.Mount{{
+				Destination: "/sandbox",
+				Type:        "bind",
+				Source:      tmpDir,
+				Options:     []string{"rbind", "ro"},
+			}}),
+			oci.WithMemoryLimit(uint64(req.MemoryLimit)*1024*1024),
+			sandboxSecurityOpts(),
+		),
+	)
+	if err != nil {
+		return infraErr("create container: %v", err)
+	}
+	defer container.Delete(ctx, containerd.WithSnapshotCleanup)
+
+	inputInfo, err := os.Stat(req.InputPath)
+	if err != nil {
+		return infraErr("stat input file: %v", err)
+	}
+	if inputInfo.Size() > maxInputSize {
+		return infraErr("input file too large: %d bytes (max %d)", inputInfo.Size(), maxInputSize)
+	}
+	inputData, err := os.ReadFile(req.InputPath)
+	if err != nil {
+		return infraErr("read input file: %v", err)
+	}
+
+	oleLimiter := newOutputLimiter(outputLimitBytes)
+	stdoutLW := newLimitedWriter(oleLimiter)
+	stderrLW := newLimitedWriter(oleLimiter)
+
+	task, err := container.NewTask(ctx, cio.NewCreator(
+		cio.WithStreams(bytes.NewReader(inputData), stdoutLW, stderrLW),
+	))
+	if err != nil {
+		return infraErr("create task: %v", err)
+	}
+	defer task.Delete(ctx)
+
+	exitCh, err := task.Wait(ctx)
+	if err != nil {
+		return infraErr("setup wait: %v", err)
+	}
+
+	startTime := time.Now()
+	if err := task.Start(ctx); err != nil {
+		return infraErr("start task: %v", err)
+	}
+
+	if err := task.CloseIO(ctx, containerd.WithStdinCloser); err != nil {
+		_ = err
+	}
+
+	cpuLimitMs := req.TimeLimit
+	wallLimitMs := cpuLimitMs * wallTimeMultiplier
+	wallDeadline := time.NewTimer(time.Duration(wallLimitMs) * time.Millisecond)
+	defer wallDeadline.Stop()
+
+	var reason string
+	select {
+	case status := <-exitCh:
+		wallElapsed := time.Since(startTime)
+		code, _, err := status.Result()
+		if err != nil {
+			return infraErr("task result: %v", err)
+		}
+		metrics := collectMetrics(ctx, task)
+		return buildVerdict(code, wallElapsed, metrics, cpuLimitMs, req.MemoryLimit, outputLimitBytes, stdoutLW, stderrLW), nil
+
+	case <-oleLimiter.ch:
+		reason = "output limit exceeded"
+
+	case <-wallDeadline.C:
+		reason = "wall time limit exceeded"
+	}
+
+	// The process is still running — collect stats, then kill.
+	metrics := collectMetrics(ctx, task)
+	_ = task.Kill(ctx, syscall.SIGKILL)
+	<-exitCh
+
+	cpuMs := clampInt(metrics.cpuNanos/1e6, uint64(cpuLimitMs))
+	peakMemMB := int(metrics.peakMemBytes / 1024 / 1024)
+
+	if stdoutLW.isOverflowed() || stderrLW.isOverflowed() {
+		return model.ExecuteResult{
+			Verdict:    model.VerdictOLE,
+			TimeUsed:   cpuMs,
+			MemoryUsed: peakMemMB,
+			ExtraInfo:  fmt.Sprintf("output limit exceeded (%d bytes max)", outputLimitBytes),
+		}, nil
+	}
+	return model.ExecuteResult{
+		Verdict:    model.VerdictTLE,
+		TimeUsed:   cpuMs,
+		MemoryUsed: peakMemMB,
+		ExtraInfo:  fmt.Sprintf("%s (%dms wall, cpu limit %dms)", reason, wallLimitMs, cpuLimitMs),
+	}, nil
+}
+
+// ---------- verdict ----------
+
+func buildVerdict(
+	exitCode uint32,
+	wallElapsed time.Duration,
+	metrics cgroupMetrics,
+	cpuLimitMs int,
+	memoryLimitMB int,
+	outputLimitBytes int64,
+	stdoutLW, stderrLW *limitedWriter,
+) model.ExecuteResult {
+	cpuMs := int(metrics.cpuNanos / 1e6)
+	peakMemMB := int(metrics.peakMemBytes / 1024 / 1024)
+
+	res := model.ExecuteResult{
+		Stdout:     stdoutLW.String(),
+		TimeUsed:   cpuMs,
+		MemoryUsed: peakMemMB,
+		ExitCode:   int(exitCode),
+	}
+
+	if cpuMs == 0 {
+		res.TimeUsed = int(wallElapsed.Milliseconds())
+	}
+
+	// Detect MLE: kernel OOM kill, SIGKILL(137), or peak memory saturating
+	// the cgroup limit.  The last case catches runtimes (JVM, Python) that
+	// handle OOM internally and exit before the kernel kills them.
+	memoryHitLimit := memoryLimitMB > 0 && peakMemMB >= memoryLimitMB
+
+	// Priority: OLE > MLE > TLE > OK > RE
+	switch {
+	case stdoutLW.isOverflowed() || stderrLW.isOverflowed():
+		res.Verdict = model.VerdictOLE
+		res.ExtraInfo = fmt.Sprintf("output limit exceeded (%d bytes max)", outputLimitBytes)
+
+	case metrics.oomKillDetected || exitCode == 137 || (exitCode != 0 && memoryHitLimit):
+		res.Verdict = model.VerdictMLE
+		res.ExtraInfo = fmt.Sprintf("memory limit exceeded (peak %dMB, limit %dMB)", peakMemMB, memoryLimitMB)
+
+	case cpuMs > cpuLimitMs:
+		res.Verdict = model.VerdictTLE
+		res.ExtraInfo = fmt.Sprintf("CPU time exceeded: %dms > %dms", cpuMs, cpuLimitMs)
+
+	case exitCode == 0:
+		res.Verdict = model.VerdictOK
+
+	default:
+		res.Verdict = model.VerdictRE
+		res.ExtraInfo = stderrLW.String()
+	}
+	return res
+}
+
+// ---------- helpers ----------
+
+func (r *ContainerdRunner) ensureImage(ctx context.Context, client *containerd.Client) (containerd.Image, error) {
+	image, err := client.GetImage(ctx, r.imageRef())
+	if err == nil {
+		return image, nil
+	}
+	if !errdefs.IsNotFound(err) {
+		return nil, fmt.Errorf("get image %s: %w", r.imageRef(), err)
+	}
+	return client.Pull(ctx, r.imageRef(), containerd.WithPullUnpack)
+}
+
+func (r *ContainerdRunner) imageRef() string { return r.profile.ImageRef }
+
+func infraErr(format string, args ...any) (model.ExecuteResult, error) {
+	msg := fmt.Sprintf(format, args...)
+	return model.ExecuteResult{
+		Verdict:   model.VerdictUKE,
+		ExitCode:  -1,
+		ExtraInfo: msg,
+	}, fmt.Errorf("%s", msg)
+}
+
+func copyFile(src, dst string, perm os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, in)
+	return err
+}
+
+func clampInt(v, max uint64) int {
+	if v > max {
+		return int(max)
+	}
+	return int(v)
+}
