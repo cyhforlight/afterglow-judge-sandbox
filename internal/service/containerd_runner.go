@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/oci"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 
+	cgroupsv1 "github.com/containerd/cgroups/v3/cgroup1/stats"
 	cgroupsv2 "github.com/containerd/cgroups/v3/cgroup2/stats"
 	"github.com/containerd/errdefs"
 	typeurl "github.com/containerd/typeurl/v2"
@@ -31,6 +33,7 @@ import (
 const (
 	defaultSocketPath = "/run/containerd/containerd.sock"
 	defaultNamespace  = "afterglow"
+	cgroupV2CheckPath = "/sys/fs/cgroup/cgroup.controllers"
 
 	// Wall time is allowed to be this multiple of CPU time limit.
 	// Accounts for I/O waits, scheduling latency, container overhead, etc.
@@ -42,6 +45,9 @@ const (
 
 	// Safety cap for input file size to prevent host OOM from malicious inputs.
 	maxInputSize = 256 * 1024 * 1024 // 256 MB
+
+	// Treat usage >= 99.5% of the limit as hitting memory limit.
+	memoryHitThresholdPermille = 995
 )
 
 // pickCPU randomly selects a CPU core for the container.  Each sandbox
@@ -92,6 +98,9 @@ type ContainerdRunner struct {
 	socketPath string
 	namespace  string
 	profile    RunProfile
+
+	checkCgroupV2   func() error
+	checkContainerd func(ctx context.Context, socketPath string) error
 }
 
 func NewContainerdRunner(socketPath string, profile RunProfile) *ContainerdRunner {
@@ -99,10 +108,49 @@ func NewContainerdRunner(socketPath string, profile RunProfile) *ContainerdRunne
 		socketPath = defaultSocketPath
 	}
 	return &ContainerdRunner{
-		socketPath: socketPath,
-		namespace:  defaultNamespace,
-		profile:    profile,
+		socketPath:      socketPath,
+		namespace:       defaultNamespace,
+		profile:         profile,
+		checkCgroupV2:   ensureCgroupV2Enabled,
+		checkContainerd: ensureContainerdAvailable,
 	}
+}
+
+func ensureCgroupV2Enabled() error {
+	_, err := os.Stat(cgroupV2CheckPath)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return errors.New("cgroup v2 is required: missing /sys/fs/cgroup/cgroup.controllers")
+	}
+	return fmt.Errorf("check cgroup v2 mount: %w", err)
+}
+
+func ensureContainerdAvailable(ctx context.Context, socketPath string) error {
+	client, err := containerd.New(socketPath)
+	if err != nil {
+		return fmt.Errorf("connect to containerd socket %q: %w", socketPath, err)
+	}
+	defer func() { _ = client.Close() }()
+
+	checkCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	if _, err := client.Version(checkCtx); err != nil {
+		return fmt.Errorf("ping containerd on %q: %w", socketPath, err)
+	}
+	return nil
+}
+
+func (r *ContainerdRunner) PreflightCheck(ctx context.Context) error {
+	if err := r.checkCgroupV2(); err != nil {
+		return err
+	}
+	if err := r.checkContainerd(ctx, r.socketPath); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ---------- container security ----------
@@ -142,6 +190,7 @@ func sandboxSecurityOpts() oci.SpecOpts {
 type cgroupMetrics struct {
 	cpuNanos        uint64
 	peakMemBytes    uint64
+	memoryLimitHit  bool
 	oomKillDetected bool
 }
 
@@ -155,18 +204,49 @@ func collectMetrics(ctx context.Context, task containerd.Task) cgroupMetrics {
 
 func parseCgroupMetrics(data typeurl.Any) cgroupMetrics {
 	var m cgroupMetrics
+
 	var v2 cgroupsv2.Metrics
-	if err := typeurl.UnmarshalTo(data, &v2); err != nil {
+	if err := typeurl.UnmarshalTo(data, &v2); err == nil {
+		if v2.CPU != nil {
+			m.cpuNanos = v2.CPU.UsageUsec * 1000
+		}
+		if v2.Memory != nil {
+			m.peakMemBytes = max(v2.Memory.MaxUsage, v2.Memory.Usage)
+		}
+		if v2.MemoryEvents != nil {
+			if v2.MemoryEvents.OomKill > 0 {
+				m.oomKillDetected = true
+			}
+			if v2.MemoryEvents.Max > 0 || v2.MemoryEvents.Oom > 0 {
+				m.memoryLimitHit = true
+			}
+		}
 		return m
 	}
-	if v2.CPU != nil {
-		m.cpuNanos = v2.CPU.UsageUsec * 1000
+
+	var v1 cgroupsv1.Metrics
+	if err := typeurl.UnmarshalTo(data, &v1); err != nil {
+		return m
 	}
-	if v2.Memory != nil {
-		m.peakMemBytes = v2.Memory.MaxUsage
+
+	if v1.CPU != nil && v1.CPU.Usage != nil {
+		m.cpuNanos = v1.CPU.Usage.Total
 	}
-	if v2.MemoryEvents != nil && v2.MemoryEvents.OomKill > 0 {
-		m.oomKillDetected = true
+
+	if v1.Memory != nil && v1.Memory.Usage != nil {
+		m.peakMemBytes = max(v1.Memory.Usage.Max, v1.Memory.Usage.Usage)
+		if v1.Memory.Usage.Failcnt > 0 {
+			m.memoryLimitHit = true
+		}
+	}
+
+	if v1.MemoryOomControl != nil {
+		if v1.MemoryOomControl.OomKill > 0 {
+			m.oomKillDetected = true
+		}
+		if v1.MemoryOomControl.UnderOom > 0 {
+			m.memoryLimitHit = true
+		}
 	}
 	return m
 }
@@ -281,7 +361,8 @@ func (r *ContainerdRunner) Execute(ctx context.Context, req model.ExecuteRequest
 	containerPath := "/sandbox/" + r.profile.SandboxFile
 	args := r.profile.BuildArgs(containerPath)
 
-	outputLimitBytes := int64(req.MemoryLimit) * 1024 * 1024
+	memoryLimitBytes := int64(req.MemoryLimit) * 1024 * 1024
+	outputLimitBytes := memoryLimitBytes
 
 	container, err := client.NewContainer(ctx, id,
 		containerd.WithImage(image),
@@ -295,7 +376,8 @@ func (r *ContainerdRunner) Execute(ctx context.Context, req model.ExecuteRequest
 				Source:      tmpDir,
 				Options:     []string{"rbind", "ro"},
 			}}),
-			oci.WithMemoryLimit(uint64(req.MemoryLimit)*1024*1024),
+			oci.WithMemoryLimit(uint64(memoryLimitBytes)),
+			oci.WithMemorySwap(memoryLimitBytes),
 			sandboxSecurityOpts(),
 		),
 	)
@@ -368,6 +450,44 @@ func (r *ContainerdRunner) Execute(ctx context.Context, req model.ExecuteRequest
 	_ = task.Kill(ctx, syscall.SIGKILL)
 	<-exitCh
 
+	return buildForcedStopVerdict(reason, wallLimitMs, cpuLimitMs, req.MemoryLimit, outputLimitBytes, metrics, stdoutLW, stderrLW), nil
+}
+
+// ---------- verdict ----------
+
+func memoryLimitReached(metrics cgroupMetrics, memoryLimitMB int) bool {
+	if metrics.memoryLimitHit {
+		return true
+	}
+	if memoryLimitMB <= 0 {
+		return false
+	}
+
+	limitBytes := uint64(memoryLimitMB) * 1024 * 1024
+	if metrics.peakMemBytes >= limitBytes {
+		return true
+	}
+	if limitBytes == 0 {
+		return false
+	}
+	return metrics.peakMemBytes*1000 >= limitBytes*memoryHitThresholdPermille
+}
+
+func runtimeOOMDetected(stderr string) bool {
+	message := strings.ToLower(stderr)
+	return strings.Contains(message, "outofmemory") || strings.Contains(message, "cannot allocate memory")
+}
+
+func buildForcedStopVerdict(
+	reason string,
+	wallLimitMs int,
+	cpuLimitMs int,
+	memoryLimitMB int,
+	outputLimitBytes int64,
+	metrics cgroupMetrics,
+	stdoutLW *limitedWriter,
+	stderrLW *limitedWriter,
+) model.ExecuteResult {
 	cpuMs := clampInt(metrics.cpuNanos/1e6, uint64(cpuLimitMs))
 	peakMemMB := int(metrics.peakMemBytes / 1024 / 1024)
 
@@ -377,17 +497,23 @@ func (r *ContainerdRunner) Execute(ctx context.Context, req model.ExecuteRequest
 			TimeUsed:   cpuMs,
 			MemoryUsed: peakMemMB,
 			ExtraInfo:  fmt.Sprintf("output limit exceeded (%d bytes max)", outputLimitBytes),
-		}, nil
+		}
+	}
+	if metrics.oomKillDetected || memoryLimitReached(metrics, memoryLimitMB) {
+		return model.ExecuteResult{
+			Verdict:    model.VerdictMLE,
+			TimeUsed:   cpuMs,
+			MemoryUsed: peakMemMB,
+			ExtraInfo:  fmt.Sprintf("memory limit exceeded (peak %dMB, limit %dMB)", peakMemMB, memoryLimitMB),
+		}
 	}
 	return model.ExecuteResult{
 		Verdict:    model.VerdictTLE,
 		TimeUsed:   cpuMs,
 		MemoryUsed: peakMemMB,
 		ExtraInfo:  fmt.Sprintf("%s (%dms wall, cpu limit %dms)", reason, wallLimitMs, cpuLimitMs),
-	}, nil
+	}
 }
-
-// ---------- verdict ----------
 
 func buildVerdict(
 	exitCode uint32,
@@ -415,7 +541,8 @@ func buildVerdict(
 	// Detect MLE: kernel OOM kill, SIGKILL(137), or peak memory saturating
 	// the cgroup limit.  The last case catches runtimes (JVM, Python) that
 	// handle OOM internally and exit before the kernel kills them.
-	memoryHitLimit := memoryLimitMB > 0 && peakMemMB >= memoryLimitMB
+	memoryHitLimit := memoryLimitReached(metrics, memoryLimitMB)
+	runtimeOOM := runtimeOOMDetected(stderrLW.String())
 
 	// Priority: OLE > MLE > TLE > OK > RE
 	switch {
@@ -423,7 +550,7 @@ func buildVerdict(
 		res.Verdict = model.VerdictOLE
 		res.ExtraInfo = fmt.Sprintf("output limit exceeded (%d bytes max)", outputLimitBytes)
 
-	case metrics.oomKillDetected || exitCode == 137 || (exitCode != 0 && memoryHitLimit):
+	case metrics.oomKillDetected || exitCode == 137 || runtimeOOM || (exitCode != 0 && memoryHitLimit):
 		res.Verdict = model.VerdictMLE
 		res.ExtraInfo = fmt.Sprintf("memory limit exceeded (peak %dMB, limit %dMB)", peakMemMB, memoryLimitMB)
 

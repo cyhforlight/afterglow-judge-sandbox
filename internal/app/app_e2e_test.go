@@ -202,6 +202,9 @@ func skipIfE2EPrerequisitesMissing(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("skip e2e: requires root. run with: sudo env GOCACHE=/tmp/go-build go test ./internal/app -run TestRun_E2E_WithFixturePrograms -v")
 	}
+	if _, err := os.Stat("/sys/fs/cgroup/cgroup.controllers"); err != nil {
+		t.Skipf("skip e2e: cgroup v2 is required: %v", err)
+	}
 
 	socketPath := os.Getenv("CONTAINERD_SOCKET")
 	if socketPath == "" {

@@ -13,6 +13,11 @@ type Runner interface {
 	Execute(ctx context.Context, req model.ExecuteRequest) (model.ExecuteResult, error)
 }
 
+// PreflightChecker verifies host prerequisites before executing untrusted code.
+type PreflightChecker interface {
+	PreflightCheck(ctx context.Context) error
+}
+
 // DispatchRunner routes execution to a language-specific ContainerdRunner.
 type DispatchRunner struct {
 	runners map[model.Language]Runner
@@ -44,4 +49,17 @@ func (d *DispatchRunner) Execute(ctx context.Context, req model.ExecuteRequest) 
 		}, errors.New(msg)
 	}
 	return r.Execute(ctx, req)
+}
+
+func (d *DispatchRunner) PreflightCheck(ctx context.Context) error {
+	for _, runner := range d.runners {
+		checker, ok := runner.(PreflightChecker)
+		if !ok {
+			continue
+		}
+		if err := checker.PreflightCheck(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -2,12 +2,16 @@ package service
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	cgroupsv1 "github.com/containerd/cgroups/v3/cgroup1/stats"
+	cgroupsv2 "github.com/containerd/cgroups/v3/cgroup2/stats"
+	typeurl "github.com/containerd/typeurl/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -282,6 +286,174 @@ func TestBuildVerdict_FallbackToWallTime(t *testing.T) {
 }
 
 // ============================================================
+// buildForcedStopVerdict
+// ============================================================
+
+func TestBuildForcedStopVerdict_MLEWhenMemoryLimitHit(t *testing.T) {
+	stdout, stderr := makeLimitedWriters(1024)
+	res := buildForcedStopVerdict(
+		"wall time limit exceeded",
+		9000,
+		3000,
+		128,
+		1024,
+		cgroupMetrics{
+			cpuNanos:       2_000_000_000,
+			peakMemBytes:   134_213_632, // ~128MB minus a few pages.
+			memoryLimitHit: true,
+		},
+		stdout,
+		stderr,
+	)
+
+	assert.Equal(t, model.VerdictMLE, res.Verdict)
+	assert.GreaterOrEqual(t, res.MemoryUsed, 127)
+}
+
+func TestBuildForcedStopVerdict_TLEWhenMemoryNotHit(t *testing.T) {
+	stdout, stderr := makeLimitedWriters(1024)
+	res := buildForcedStopVerdict(
+		"wall time limit exceeded",
+		9000,
+		3000,
+		256,
+		1024,
+		cgroupMetrics{
+			cpuNanos:     2_000_000_000,
+			peakMemBytes: 32 * 1024 * 1024,
+		},
+		stdout,
+		stderr,
+	)
+
+	assert.Equal(t, model.VerdictTLE, res.Verdict)
+}
+
+func TestMemoryLimitReached(t *testing.T) {
+	tests := []struct {
+		name     string
+		metrics  cgroupMetrics
+		limitMB  int
+		expected bool
+	}{
+		{
+			name: "memory events reported limit hit",
+			metrics: cgroupMetrics{
+				memoryLimitHit: true,
+			},
+			limitMB:  128,
+			expected: true,
+		},
+		{
+			name: "usage above threshold",
+			metrics: cgroupMetrics{
+				peakMemBytes: 134_213_632,
+			},
+			limitMB:  128,
+			expected: true,
+		},
+		{
+			name: "usage clearly below threshold",
+			metrics: cgroupMetrics{
+				peakMemBytes: 64 * 1024 * 1024,
+			},
+			limitMB:  128,
+			expected: false,
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			assert.Equal(t, testCase.expected, memoryLimitReached(testCase.metrics, testCase.limitMB))
+		})
+	}
+}
+
+func TestRuntimeOOMDetected(t *testing.T) {
+	tests := []struct {
+		name     string
+		stderr   string
+		expected bool
+	}{
+		{
+			name:     "java out of memory",
+			stderr:   "java.lang.OutOfMemoryError: Java heap space",
+			expected: true,
+		},
+		{
+			name:     "glibc allocation failure",
+			stderr:   "Cannot allocate memory",
+			expected: true,
+		},
+		{
+			name:     "normal runtime error",
+			stderr:   "segmentation fault",
+			expected: false,
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			assert.Equal(t, testCase.expected, runtimeOOMDetected(testCase.stderr))
+		})
+	}
+}
+
+// ============================================================
+// parseCgroupMetrics
+// ============================================================
+
+func TestParseCgroupMetrics_V2(t *testing.T) {
+	metricAny, err := typeurl.MarshalAny(&cgroupsv2.Metrics{
+		CPU: &cgroupsv2.CPUStat{
+			UsageUsec: 1234,
+		},
+		Memory: &cgroupsv2.MemoryStat{
+			Usage:    100,
+			MaxUsage: 200,
+		},
+		MemoryEvents: &cgroupsv2.MemoryEvents{
+			Max:     2,
+			OomKill: 1,
+		},
+	})
+	require.NoError(t, err)
+
+	got := parseCgroupMetrics(metricAny)
+	assert.Equal(t, uint64(1_234_000), got.cpuNanos)
+	assert.Equal(t, uint64(200), got.peakMemBytes)
+	assert.True(t, got.memoryLimitHit)
+	assert.True(t, got.oomKillDetected)
+}
+
+func TestParseCgroupMetrics_V1Fallback(t *testing.T) {
+	metricAny, err := typeurl.MarshalAny(&cgroupsv1.Metrics{
+		CPU: &cgroupsv1.CPUStat{
+			Usage: &cgroupsv1.CPUUsage{
+				Total: 5678,
+			},
+		},
+		Memory: &cgroupsv1.MemoryStat{
+			Usage: &cgroupsv1.MemoryEntry{
+				Usage:   100,
+				Max:     300,
+				Failcnt: 5,
+			},
+		},
+		MemoryOomControl: &cgroupsv1.MemoryOomControl{
+			OomKill: 1,
+		},
+	})
+	require.NoError(t, err)
+
+	got := parseCgroupMetrics(metricAny)
+	assert.Equal(t, uint64(5678), got.cpuNanos)
+	assert.Equal(t, uint64(300), got.peakMemBytes)
+	assert.True(t, got.memoryLimitHit)
+	assert.True(t, got.oomKillDetected)
+}
+
+// ============================================================
 // clampInt
 // ============================================================
 
@@ -343,4 +515,112 @@ func TestDispatchRunner_UnknownLanguage(t *testing.T) {
 	d := &DispatchRunner{runners: map[model.Language]Runner{}}
 	_, err := d.Execute(context.Background(), model.ExecuteRequest{Language: model.LanguageUnknown})
 	assert.Error(t, err)
+}
+
+func TestContainerdRunner_PreflightCheck(t *testing.T) {
+	tests := []struct {
+		name                    string
+		cgroupErr               error
+		containerdErr           error
+		wantErr                 string
+		wantContainerdCheckCall bool
+	}{
+		{
+			name:                    "cgroup check failed",
+			cgroupErr:               errors.New("no cgroup v2"),
+			wantErr:                 "no cgroup v2",
+			wantContainerdCheckCall: false,
+		},
+		{
+			name:                    "containerd check failed",
+			containerdErr:           errors.New("socket denied"),
+			wantErr:                 "socket denied",
+			wantContainerdCheckCall: true,
+		},
+		{
+			name:                    "all checks passed",
+			wantErr:                 "",
+			wantContainerdCheckCall: true,
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			runner := NewContainerdRunner("unix:///run/containerd/containerd.sock", NativeRunProfile())
+			runner.checkCgroupV2 = func() error {
+				return testCase.cgroupErr
+			}
+
+			containerdCheckCalled := false
+			runner.checkContainerd = func(_ context.Context, _ string) error {
+				containerdCheckCalled = true
+				return testCase.containerdErr
+			}
+
+			err := runner.PreflightCheck(context.Background())
+			if testCase.wantErr == "" {
+				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), testCase.wantErr)
+			}
+			assert.Equal(t, testCase.wantContainerdCheckCall, containerdCheckCalled)
+		})
+	}
+}
+
+type preflightStubRunner struct {
+	executeErr   error
+	preflightErr error
+	called       bool
+}
+
+func (r *preflightStubRunner) Execute(_ context.Context, _ model.ExecuteRequest) (model.ExecuteResult, error) {
+	return model.ExecuteResult{}, r.executeErr
+}
+
+func (r *preflightStubRunner) PreflightCheck(_ context.Context) error {
+	r.called = true
+	return r.preflightErr
+}
+
+func TestDispatchRunner_PreflightCheck(t *testing.T) {
+	tests := []struct {
+		name         string
+		preflightErr error
+		wantErr      string
+	}{
+		{
+			name:         "propagate preflight error",
+			preflightErr: errors.New("containerd denied"),
+			wantErr:      "containerd denied",
+		},
+		{
+			name:         "preflight passed",
+			preflightErr: nil,
+			wantErr:      "",
+		},
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			stub := &preflightStubRunner{
+				preflightErr: testCase.preflightErr,
+			}
+			dispatch := &DispatchRunner{
+				runners: map[model.Language]Runner{
+					model.LanguageCPP: stub,
+				},
+			}
+
+			err := dispatch.PreflightCheck(context.Background())
+			if testCase.wantErr == "" {
+				assert.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), testCase.wantErr)
+			}
+			assert.True(t, stub.called)
+		})
+	}
 }

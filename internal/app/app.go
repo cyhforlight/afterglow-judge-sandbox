@@ -37,6 +37,14 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return 2
 	}
 
+	checker, ok := a.runner.(service.PreflightChecker)
+	if ok {
+		if err := checker.PreflightCheck(ctx); err != nil {
+			_, _ = fmt.Fprintf(a.errOut, "environment check failed: %v\n", err)
+			return 1
+		}
+	}
+
 	result, err := a.runner.Execute(ctx, req)
 	if err != nil {
 		_, _ = fmt.Fprintf(a.errOut, "runner error: %v\n", err)
