@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"afterglow-judge-sandbox/internal/model"
 	"afterglow-judge-sandbox/internal/service"
 )
@@ -45,30 +48,16 @@ func TestRun_Success(t *testing.T) {
 		"--time-limit", "1000",
 		"--memory-limit", "256",
 	})
-	if exitCode != 0 {
-		t.Fatalf("unexpected exit code: got %d, want 0 (stderr=%s)", exitCode, errOut.String())
-	}
+	require.Equal(t, 0, exitCode, "stderr=%s", errOut.String())
 
-	if runner.gotReq.ExecutablePath != "/tmp/a.out" {
-		t.Fatalf("unexpected executable path: %s", runner.gotReq.ExecutablePath)
-	}
-	if runner.gotReq.InputPath != "/tmp/input.txt" {
-		t.Fatalf("unexpected input path: %s", runner.gotReq.InputPath)
-	}
-	if runner.gotReq.Language != model.LanguageCPP {
-		t.Fatalf("unexpected language: %v", runner.gotReq.Language)
-	}
+	assert.Equal(t, "/tmp/a.out", runner.gotReq.ExecutablePath)
+	assert.Equal(t, "/tmp/input.txt", runner.gotReq.InputPath)
+	assert.Equal(t, model.LanguageCPP, runner.gotReq.Language)
 
 	var fields map[string]interface{}
-	if err := json.Unmarshal(out.Bytes(), &fields); err != nil {
-		t.Fatalf("failed to decode output json: %v (output=%q)", err, out.String())
-	}
-	if got := fields["verdict"]; got != fixed.Verdict.String() {
-		t.Fatalf("verdict: got %q, want %q", got, fixed.Verdict.String())
-	}
-	if got := fields["stdout"]; got != fixed.Stdout {
-		t.Fatalf("stdout: got %q, want %q", got, fixed.Stdout)
-	}
+	require.NoError(t, json.Unmarshal(out.Bytes(), &fields), "output=%q", out.String())
+	assert.Equal(t, fixed.Verdict.String(), fields["verdict"])
+	assert.Equal(t, fixed.Stdout, fields["stdout"])
 }
 
 func TestRun_InvalidArgs(t *testing.T) {
@@ -84,9 +73,7 @@ func TestRun_InvalidArgs(t *testing.T) {
 		"--time-limit", "1000",
 		"--memory-limit", "256",
 	})
-	if exitCode != 2 {
-		t.Fatalf("unexpected exit code: got %d, want 2", exitCode)
-	}
+	assert.Equal(t, 2, exitCode)
 }
 
 func TestRun_Help(t *testing.T) {
@@ -97,13 +84,7 @@ func TestRun_Help(t *testing.T) {
 	application := New(runner, &out, &errOut)
 
 	exitCode := application.Run(context.Background(), []string{"--help"})
-	if exitCode != 0 {
-		t.Fatalf("unexpected exit code: got %d, want 0", exitCode)
-	}
-	if out.Len() == 0 {
-		t.Fatal("expected usage output on stdout, got empty")
-	}
-	if errOut.Len() != 0 {
-		t.Fatalf("unexpected stderr output: %q", errOut.String())
-	}
+	assert.Equal(t, 0, exitCode)
+	assert.NotEmpty(t, out.String(), "expected usage output on stdout")
+	assert.Empty(t, errOut.String(), "unexpected stderr output")
 }

@@ -1,6 +1,10 @@
 package cli
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+)
 
 func TestParseArgs_MissingLanguage(t *testing.T) {
 	_, err := ParseArgs([]string{
@@ -9,9 +13,7 @@ func TestParseArgs_MissingLanguage(t *testing.T) {
 		"--time-limit", "1000",
 		"--memory-limit", "256",
 	})
-	if err == nil || err.Error() != "missing required flag: --lang" {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	assert.EqualError(t, err, "missing required flag: --lang")
 }
 
 func TestParseArgs_RejectsWhitespaceOnlyPaths(t *testing.T) {
@@ -22,9 +24,7 @@ func TestParseArgs_RejectsWhitespaceOnlyPaths(t *testing.T) {
 		"--time-limit", "1000",
 		"--memory-limit", "256",
 	})
-	if err == nil || err.Error() != "missing required flag: --exec" {
-		t.Fatalf("unexpected error for exec path: %v", err)
-	}
+	assert.EqualError(t, err, "missing required flag: --exec")
 
 	_, err = ParseArgs([]string{
 		"--exec", "/tmp/a.out",
@@ -33,7 +33,5 @@ func TestParseArgs_RejectsWhitespaceOnlyPaths(t *testing.T) {
 		"--time-limit", "1000",
 		"--memory-limit", "256",
 	})
-	if err == nil || err.Error() != "missing required flag: --input" {
-		t.Fatalf("unexpected error for input path: %v", err)
-	}
+	assert.EqualError(t, err, "missing required flag: --input")
 }

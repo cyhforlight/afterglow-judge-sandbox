@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -47,7 +48,7 @@ func ParseArgs(args []string) (model.ExecuteRequest, error) {
 	languageRaw = strings.TrimSpace(languageRaw)
 
 	if languageRaw == "" {
-		return model.ExecuteRequest{}, fmt.Errorf("missing required flag: --lang")
+		return model.ExecuteRequest{}, errors.New("missing required flag: --lang")
 	}
 
 	lang, err := model.ParseLanguage(languageRaw)
@@ -57,16 +58,16 @@ func ParseArgs(args []string) (model.ExecuteRequest, error) {
 	req.Language = lang
 
 	if req.ExecutablePath == "" {
-		return model.ExecuteRequest{}, fmt.Errorf("missing required flag: --exec")
+		return model.ExecuteRequest{}, errors.New("missing required flag: --exec")
 	}
 	if req.InputPath == "" {
-		return model.ExecuteRequest{}, fmt.Errorf("missing required flag: --input")
+		return model.ExecuteRequest{}, errors.New("missing required flag: --input")
 	}
 	if req.TimeLimit <= 0 {
-		return model.ExecuteRequest{}, fmt.Errorf("--time-limit must be > 0")
+		return model.ExecuteRequest{}, errors.New("--time-limit must be > 0")
 	}
 	if req.MemoryLimit <= 0 {
-		return model.ExecuteRequest{}, fmt.Errorf("--memory-limit must be > 0")
+		return model.ExecuteRequest{}, errors.New("--memory-limit must be > 0")
 	}
 
 	return req, nil

@@ -2,10 +2,14 @@ package service
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"afterglow-judge-sandbox/internal/model"
 )
@@ -19,28 +23,19 @@ func TestLimitedWriter_NormalWrite(t *testing.T) {
 	w := newLimitedWriter(lim)
 
 	n, err := w.Write([]byte("hello"))
-	if err != nil || n != 5 {
-		t.Fatalf("Write: n=%d, err=%v", n, err)
-	}
-	if w.String() != "hello" {
-		t.Fatalf("got %q, want %q", w.String(), "hello")
-	}
-	if w.isOverflowed() {
-		t.Fatal("should not overflow")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 5, n)
+	assert.Equal(t, "hello", w.String())
+	assert.False(t, w.isOverflowed())
 }
 
 func TestLimitedWriter_ExactBoundary(t *testing.T) {
 	lim := newOutputLimiter(5)
 	w := newLimitedWriter(lim)
 
-	w.Write([]byte("12345"))
-	if w.isOverflowed() {
-		t.Fatal("exact boundary should not overflow")
-	}
-	if w.String() != "12345" {
-		t.Fatalf("got %q", w.String())
-	}
+	_, _ = w.Write([]byte("12345"))
+	assert.False(t, w.isOverflowed(), "exact boundary should not overflow")
+	assert.Equal(t, "12345", w.String())
 }
 
 func TestLimitedWriter_OverflowTruncates(t *testing.T) {
@@ -48,25 +43,17 @@ func TestLimitedWriter_OverflowTruncates(t *testing.T) {
 	w := newLimitedWriter(lim)
 
 	n, err := w.Write([]byte("hello world"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 11 {
-		t.Fatalf("Write should report full length consumed: got %d", n)
-	}
-	if w.String() != "hello" {
-		t.Fatalf("got %q, want %q (truncated)", w.String(), "hello")
-	}
-	if !w.isOverflowed() {
-		t.Fatal("should be overflowed")
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 11, n, "Write should report full length consumed")
+	assert.Equal(t, "hello", w.String(), "should be truncated")
+	assert.True(t, w.isOverflowed())
 }
 
 func TestLimitedWriter_OverflowSignalsLimiter(t *testing.T) {
 	lim := newOutputLimiter(3)
 	w := newLimitedWriter(lim)
 
-	w.Write([]byte("abcdef"))
+	_, _ = w.Write([]byte("abcdef"))
 
 	select {
 	case <-lim.ch:
@@ -79,34 +66,26 @@ func TestLimitedWriter_SubsequentWritesAfterOverflow(t *testing.T) {
 	lim := newOutputLimiter(3)
 	w := newLimitedWriter(lim)
 
-	w.Write([]byte("abcdef"))
-	w.Write([]byte("more data"))
-	w.Write([]byte("even more"))
+	_, _ = w.Write([]byte("abcdef"))
+	_, _ = w.Write([]byte("more data"))
+	_, _ = w.Write([]byte("even more"))
 
-	if w.String() != "abc" {
-		t.Fatalf("got %q, want %q", w.String(), "abc")
-	}
+	assert.Equal(t, "abc", w.String())
 }
 
 func TestLimitedWriter_MultipleWritesTriggerOverflow(t *testing.T) {
 	lim := newOutputLimiter(10)
 	w := newLimitedWriter(lim)
 
-	w.Write([]byte("12345"))
-	if w.isOverflowed() {
-		t.Fatal("should not overflow yet")
-	}
-	w.Write([]byte("678"))
-	if w.isOverflowed() {
-		t.Fatal("still within limit (8 <= 10)")
-	}
-	w.Write([]byte("90AB"))
-	if !w.isOverflowed() {
-		t.Fatal("should overflow (12 > 10)")
-	}
-	if w.String() != "1234567890" {
-		t.Fatalf("got %q", w.String())
-	}
+	_, _ = w.Write([]byte("12345"))
+	assert.False(t, w.isOverflowed(), "should not overflow yet")
+
+	_, _ = w.Write([]byte("678"))
+	assert.False(t, w.isOverflowed(), "still within limit (8 <= 10)")
+
+	_, _ = w.Write([]byte("90AB"))
+	assert.True(t, w.isOverflowed(), "should overflow (12 > 10)")
+	assert.Equal(t, "1234567890", w.String())
 }
 
 func TestLimitedWriter_ConcurrentWrites(t *testing.T) {
@@ -114,21 +93,17 @@ func TestLimitedWriter_ConcurrentWrites(t *testing.T) {
 	w := newLimitedWriter(lim)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			w.Write([]byte("0123456789"))
+			_, _ = w.Write([]byte("0123456789"))
 		}()
 	}
 	wg.Wait()
 
-	if w.isOverflowed() {
-		t.Fatal("1000 bytes of writes into 1000-byte limit should not overflow")
-	}
-	if len(w.String()) != 1000 {
-		t.Fatalf("expected 1000 bytes, got %d", len(w.String()))
-	}
+	assert.False(t, w.isOverflowed(), "1000 bytes into 1000-byte limit should not overflow")
+	assert.Len(t, w.String(), 1000)
 }
 
 // ============================================================
@@ -140,17 +115,15 @@ func TestSharedOutputBudget_SplitAcrossWriters(t *testing.T) {
 	stdout := newLimitedWriter(lim)
 	stderr := newLimitedWriter(lim)
 
-	stdout.Write([]byte("12345")) // 5 bytes
-	stderr.Write([]byte("67890")) // 5 bytes, total 10 = exactly at limit
+	_, _ = stdout.Write([]byte("12345"))
+	_, _ = stderr.Write([]byte("67890"))
 
-	if stdout.isOverflowed() || stderr.isOverflowed() {
-		t.Fatal("exactly at limit should not overflow")
-	}
+	assert.False(t, stdout.isOverflowed(), "exactly at limit should not overflow")
+	assert.False(t, stderr.isOverflowed(), "exactly at limit should not overflow")
 
-	stderr.Write([]byte("X")) // 1 more byte pushes over
-	if !stderr.isOverflowed() {
-		t.Fatal("should overflow after exceeding shared budget")
-	}
+	_, _ = stderr.Write([]byte("X"))
+	assert.True(t, stderr.isOverflowed(), "should overflow after exceeding shared budget")
+
 	select {
 	case <-lim.ch:
 	default:
@@ -163,16 +136,11 @@ func TestSharedOutputBudget_FirstWriterExhaustsBudget(t *testing.T) {
 	stdout := newLimitedWriter(lim)
 	stderr := newLimitedWriter(lim)
 
-	stdout.Write([]byte("12345678")) // exactly 8, exhausts pool
+	_, _ = stdout.Write([]byte("12345678"))
 
-	// stderr's first write gets 0 bytes → overflow
-	stderr.Write([]byte("a"))
-	if !stderr.isOverflowed() {
-		t.Fatal("stderr should overflow when budget already exhausted")
-	}
-	if stderr.String() != "" {
-		t.Fatalf("stderr buf should be empty, got %q", stderr.String())
-	}
+	_, _ = stderr.Write([]byte("a"))
+	assert.True(t, stderr.isOverflowed(), "stderr should overflow when budget already exhausted")
+	assert.Empty(t, stderr.String(), "stderr buf should be empty")
 }
 
 // ============================================================
@@ -196,56 +164,42 @@ func TestOutputLimiter_SignalIsIdempotent(t *testing.T) {
 // buildVerdict
 // ============================================================
 
-func makeLimitedWriters(limit int64) (*outputLimiter, *limitedWriter, *limitedWriter) {
+func makeLimitedWriters(limit int64) (*limitedWriter, *limitedWriter) {
 	lim := newOutputLimiter(limit)
-	return lim, newLimitedWriter(lim), newLimitedWriter(lim)
+	return newLimitedWriter(lim), newLimitedWriter(lim)
 }
 
 func TestBuildVerdict_OK(t *testing.T) {
-	_, stdout, stderr := makeLimitedWriters(1024)
-	stdout.Write([]byte("42\n"))
+	stdout, stderr := makeLimitedWriters(1024)
+	_, _ = stdout.Write([]byte("42\n"))
 
 	res := buildVerdict(0, 50*time.Millisecond, cgroupMetrics{
 		cpuNanos:     30_000_000,
 		peakMemBytes: 4 * 1024 * 1024,
 	}, 1000, 256, 1024, stdout, stderr)
 
-	if res.Verdict != model.VerdictOK {
-		t.Fatalf("verdict: got %v, want OK", res.Verdict)
-	}
-	if res.Stdout != "42\n" {
-		t.Fatalf("stdout: got %q", res.Stdout)
-	}
-	if res.TimeUsed != 30 {
-		t.Fatalf("timeUsed: got %d, want 30", res.TimeUsed)
-	}
-	if res.MemoryUsed != 4 {
-		t.Fatalf("memoryUsed: got %d, want 4", res.MemoryUsed)
-	}
+	assert.Equal(t, model.VerdictOK, res.Verdict)
+	assert.Equal(t, "42\n", res.Stdout)
+	assert.Equal(t, 30, res.TimeUsed)
+	assert.Equal(t, 4, res.MemoryUsed)
 }
 
 func TestBuildVerdict_RE(t *testing.T) {
-	_, stdout, stderr := makeLimitedWriters(1024)
-	stderr.Write([]byte("segfault"))
+	stdout, stderr := makeLimitedWriters(1024)
+	_, _ = stderr.Write([]byte("segfault"))
 
 	res := buildVerdict(139, 10*time.Millisecond, cgroupMetrics{
 		cpuNanos:     5_000_000,
 		peakMemBytes: 2 * 1024 * 1024,
 	}, 1000, 256, 1024, stdout, stderr)
 
-	if res.Verdict != model.VerdictRE {
-		t.Fatalf("verdict: got %v, want RE", res.Verdict)
-	}
-	if res.ExitCode != 139 {
-		t.Fatalf("exitCode: got %d, want 139", res.ExitCode)
-	}
-	if !strings.Contains(res.ExtraInfo, "segfault") {
-		t.Fatalf("extraInfo should contain stderr: got %q", res.ExtraInfo)
-	}
+	assert.Equal(t, model.VerdictRE, res.Verdict)
+	assert.Equal(t, 139, res.ExitCode)
+	assert.Contains(t, res.ExtraInfo, "segfault")
 }
 
 func TestBuildVerdict_MLE_OOMKill(t *testing.T) {
-	_, stdout, stderr := makeLimitedWriters(1024)
+	stdout, stderr := makeLimitedWriters(1024)
 
 	res := buildVerdict(137, 500*time.Millisecond, cgroupMetrics{
 		cpuNanos:        400_000_000,
@@ -253,69 +207,59 @@ func TestBuildVerdict_MLE_OOMKill(t *testing.T) {
 		oomKillDetected: true,
 	}, 2000, 64, 1024, stdout, stderr)
 
-	if res.Verdict != model.VerdictMLE {
-		t.Fatalf("verdict: got %v, want MLE", res.Verdict)
-	}
+	assert.Equal(t, model.VerdictMLE, res.Verdict)
 }
 
 func TestBuildVerdict_MLE_RuntimeOOM(t *testing.T) {
-	_, stdout, stderr := makeLimitedWriters(1024)
-	stderr.Write([]byte("OutOfMemoryError"))
+	stdout, stderr := makeLimitedWriters(1024)
+	_, _ = stderr.Write([]byte("OutOfMemoryError"))
 
 	res := buildVerdict(1, 2*time.Second, cgroupMetrics{
 		cpuNanos:     1_500_000_000,
 		peakMemBytes: 256 * 1024 * 1024,
 	}, 5000, 256, 1024, stdout, stderr)
 
-	if res.Verdict != model.VerdictMLE {
-		t.Fatalf("verdict: got %v, want MLE (runtime OOM with peak at limit)", res.Verdict)
-	}
+	assert.Equal(t, model.VerdictMLE, res.Verdict, "runtime OOM with peak at limit")
 }
 
 func TestBuildVerdict_MLE_NotTriggeredOnNormalExit(t *testing.T) {
-	_, stdout, stderr := makeLimitedWriters(1024)
-	stdout.Write([]byte("ok\n"))
+	stdout, stderr := makeLimitedWriters(1024)
+	_, _ = stdout.Write([]byte("ok\n"))
 
 	res := buildVerdict(0, 100*time.Millisecond, cgroupMetrics{
 		cpuNanos:     50_000_000,
 		peakMemBytes: 256 * 1024 * 1024,
 	}, 2000, 256, 1024, stdout, stderr)
 
-	if res.Verdict != model.VerdictOK {
-		t.Fatalf("verdict: got %v, want OK (exit 0 even if memory at limit)", res.Verdict)
-	}
+	assert.Equal(t, model.VerdictOK, res.Verdict, "exit 0 even if memory at limit")
 }
 
 func TestBuildVerdict_TLE(t *testing.T) {
-	_, stdout, stderr := makeLimitedWriters(1024)
+	stdout, stderr := makeLimitedWriters(1024)
 
 	res := buildVerdict(0, 3*time.Second, cgroupMetrics{
 		cpuNanos:     2_500_000_000,
 		peakMemBytes: 10 * 1024 * 1024,
 	}, 2000, 256, 1024, stdout, stderr)
 
-	if res.Verdict != model.VerdictTLE {
-		t.Fatalf("verdict: got %v, want TLE", res.Verdict)
-	}
+	assert.Equal(t, model.VerdictTLE, res.Verdict)
 }
 
 func TestBuildVerdict_OLE(t *testing.T) {
-	_, stdout, stderr := makeLimitedWriters(10)
-	stdout.Write([]byte("this is way too much output"))
+	stdout, stderr := makeLimitedWriters(10)
+	_, _ = stdout.Write([]byte("this is way too much output"))
 
 	res := buildVerdict(0, 100*time.Millisecond, cgroupMetrics{
 		cpuNanos:     30_000_000,
 		peakMemBytes: 4 * 1024 * 1024,
 	}, 2000, 256, 10, stdout, stderr)
 
-	if res.Verdict != model.VerdictOLE {
-		t.Fatalf("verdict: got %v, want OLE", res.Verdict)
-	}
+	assert.Equal(t, model.VerdictOLE, res.Verdict)
 }
 
 func TestBuildVerdict_Priority_OLE_Over_MLE(t *testing.T) {
-	_, stdout, stderr := makeLimitedWriters(5)
-	stdout.Write([]byte("too much"))
+	stdout, stderr := makeLimitedWriters(5)
+	_, _ = stdout.Write([]byte("too much"))
 
 	res := buildVerdict(137, 500*time.Millisecond, cgroupMetrics{
 		cpuNanos:        400_000_000,
@@ -323,22 +267,18 @@ func TestBuildVerdict_Priority_OLE_Over_MLE(t *testing.T) {
 		oomKillDetected: true,
 	}, 2000, 64, 5, stdout, stderr)
 
-	if res.Verdict != model.VerdictOLE {
-		t.Fatalf("verdict: got %v, want OLE (priority over MLE)", res.Verdict)
-	}
+	assert.Equal(t, model.VerdictOLE, res.Verdict, "OLE should take priority over MLE")
 }
 
 func TestBuildVerdict_FallbackToWallTime(t *testing.T) {
-	_, stdout, stderr := makeLimitedWriters(1024)
+	stdout, stderr := makeLimitedWriters(1024)
 
 	res := buildVerdict(0, 42*time.Millisecond, cgroupMetrics{
 		cpuNanos:     0,
 		peakMemBytes: 2 * 1024 * 1024,
 	}, 2000, 256, 1024, stdout, stderr)
 
-	if res.TimeUsed != 42 {
-		t.Fatalf("timeUsed: got %d, want 42 (wall time fallback)", res.TimeUsed)
-	}
+	assert.Equal(t, 42, res.TimeUsed, "should fall back to wall time")
 }
 
 // ============================================================
@@ -346,17 +286,20 @@ func TestBuildVerdict_FallbackToWallTime(t *testing.T) {
 // ============================================================
 
 func TestClampInt(t *testing.T) {
-	if clampInt(500, 1000) != 500 {
-		t.Fatal("below max")
+	tests := []struct {
+		name     string
+		v, limit uint64
+		want     int
+	}{
+		{"below limit", 500, 1000, 500},
+		{"at limit", 1000, 1000, 1000},
+		{"above limit", 2000, 1000, 1000},
+		{"zero", 0, 1000, 0},
 	}
-	if clampInt(1000, 1000) != 1000 {
-		t.Fatal("at max")
-	}
-	if clampInt(2000, 1000) != 1000 {
-		t.Fatal("above max")
-	}
-	if clampInt(0, 1000) != 0 {
-		t.Fatal("zero")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, clampInt(tt.v, tt.limit))
+		})
 	}
 }
 
@@ -366,10 +309,10 @@ func TestClampInt(t *testing.T) {
 
 func TestRunProfiles(t *testing.T) {
 	tests := []struct {
-		name        string
-		profile     RunProfile
-		wantFile    string
-		wantArgSub  string
+		name       string
+		profile    RunProfile
+		wantFile   string
+		wantArgSub string
 	}{
 		{"native", NativeRunProfile(), "program", "/sandbox/program"},
 		{"python", PythonRunProfile(), "solution.py", "python3"},
@@ -377,25 +320,17 @@ func TestRunProfiles(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.profile.SandboxFile != tt.wantFile {
-				t.Fatalf("SandboxFile: got %q, want %q", tt.profile.SandboxFile, tt.wantFile)
-			}
-			if tt.profile.ImageRef == "" {
-				t.Fatal("ImageRef is empty")
-			}
+			assert.Equal(t, tt.wantFile, tt.profile.SandboxFile)
+			assert.NotEmpty(t, tt.profile.ImageRef)
+
 			args := tt.profile.BuildArgs("/sandbox/" + tt.profile.SandboxFile)
-			if len(args) == 0 {
-				t.Fatal("BuildArgs returned empty")
-			}
-			found := false
-			for _, a := range args {
-				if strings.Contains(a, tt.wantArgSub) {
-					found = true
-				}
-			}
-			if !found {
-				t.Fatalf("args %v should contain %q", args, tt.wantArgSub)
-			}
+			require.NotEmpty(t, args, "BuildArgs returned empty")
+			assert.True(t,
+				slices.ContainsFunc(args, func(a string) bool {
+					return strings.Contains(a, tt.wantArgSub)
+				}),
+				"args %v should contain %q", args, tt.wantArgSub,
+			)
 		})
 	}
 }
@@ -407,7 +342,5 @@ func TestRunProfiles(t *testing.T) {
 func TestDispatchRunner_UnknownLanguage(t *testing.T) {
 	d := &DispatchRunner{runners: map[model.Language]Runner{}}
 	_, err := d.Execute(context.Background(), model.ExecuteRequest{Language: model.LanguageUnknown})
-	if err == nil {
-		t.Fatal("expected error for unknown language")
-	}
+	assert.Error(t, err)
 }

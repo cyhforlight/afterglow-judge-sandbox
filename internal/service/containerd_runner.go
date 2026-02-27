@@ -3,11 +3,12 @@ package service
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
-	"math/rand"
 	"runtime"
 	"strconv"
 	"sync"
@@ -47,16 +48,16 @@ const (
 // is pinned to exactly one core (no multi-threading advantage), while
 // randomization spreads concurrent sandboxes across available cores.
 func pickCPU() string {
-	return strconv.Itoa(rand.Intn(runtime.NumCPU()))
+	return strconv.Itoa(rand.IntN(runtime.NumCPU()))
 }
 
 // RunProfile describes how a specific language's program should be
 // executed inside a container.  All language differences are captured here
 // so the container lifecycle code stays language-agnostic.
 type RunProfile struct {
-	ImageRef    string                            // container image to pull
-	SandboxFile string                            // filename inside /sandbox (e.g. "program", "solution.py")
-	FileMode    os.FileMode                       // permissions for the copied file
+	ImageRef    string                              // container image to pull
+	SandboxFile string                              // filename inside /sandbox (e.g. "program", "solution.py")
+	FileMode    os.FileMode                         // permissions for the copied file
 	BuildArgs   func(containerPath string) []string // build the process argv
 }
 
@@ -176,35 +177,33 @@ func parseCgroupMetrics(data typeurl.Any) cgroupMetrics {
 // When the combined output (stdout + stderr) exceeds the budget, the channel
 // is closed to signal OLE to the main event loop.
 type outputLimiter struct {
-	ch   chan struct{}
-	once sync.Once
-	mu   sync.Mutex
-	cap  int64
-	used int64
+	ch    chan struct{}
+	once  sync.Once
+	mu    sync.Mutex
+	limit int64
+	used  int64
 }
 
-func newOutputLimiter(limit int64) *outputLimiter {
-	return &outputLimiter{ch: make(chan struct{}), cap: limit}
+func newOutputLimiter(maxBytes int64) *outputLimiter {
+	return &outputLimiter{ch: make(chan struct{}), limit: maxBytes}
 }
 
 func (l *outputLimiter) signal() {
 	l.once.Do(func() { close(l.ch) })
 }
 
-// reserve atomically claims up to n bytes from the shared pool and returns
-// the number of bytes actually granted (may be less than n, or 0).
-func (l *outputLimiter) reserve(n int64) int64 {
+// reserve atomically claims up to requested bytes from the shared pool
+// and returns the number of bytes actually granted (may be less, or 0).
+func (l *outputLimiter) reserve(requested int64) int64 {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	remaining := l.cap - l.used
+	remaining := l.limit - l.used
 	if remaining <= 0 {
 		return 0
 	}
-	if n > remaining {
-		n = remaining
-	}
-	l.used += n
-	return n
+	granted := min(requested, remaining)
+	l.used += granted
+	return granted
 }
 
 // limitedWriter buffers output while drawing bytes from the shared
@@ -259,7 +258,7 @@ func (r *ContainerdRunner) Execute(ctx context.Context, req model.ExecuteRequest
 	if err != nil {
 		return infraErr("connect to containerd: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx = namespaces.WithNamespace(ctx, r.namespace)
 
@@ -272,7 +271,7 @@ func (r *ContainerdRunner) Execute(ctx context.Context, req model.ExecuteRequest
 	if err != nil {
 		return infraErr("create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	if err := copyFile(req.ExecutablePath, filepath.Join(tmpDir, r.profile.SandboxFile), r.profile.FileMode); err != nil {
 		return infraErr("copy program file: %v", err)
@@ -303,7 +302,7 @@ func (r *ContainerdRunner) Execute(ctx context.Context, req model.ExecuteRequest
 	if err != nil {
 		return infraErr("create container: %v", err)
 	}
-	defer container.Delete(ctx, containerd.WithSnapshotCleanup)
+	defer func() { _ = container.Delete(ctx, containerd.WithSnapshotCleanup) }()
 
 	inputInfo, err := os.Stat(req.InputPath)
 	if err != nil {
@@ -327,7 +326,7 @@ func (r *ContainerdRunner) Execute(ctx context.Context, req model.ExecuteRequest
 	if err != nil {
 		return infraErr("create task: %v", err)
 	}
-	defer task.Delete(ctx)
+	defer func() { _, _ = task.Delete(ctx) }()
 
 	exitCh, err := task.Wait(ctx)
 	if err != nil {
@@ -339,9 +338,7 @@ func (r *ContainerdRunner) Execute(ctx context.Context, req model.ExecuteRequest
 		return infraErr("start task: %v", err)
 	}
 
-	if err := task.CloseIO(ctx, containerd.WithStdinCloser); err != nil {
-		_ = err
-	}
+	_ = task.CloseIO(ctx, containerd.WithStdinCloser)
 
 	cpuLimitMs := req.TimeLimit
 	wallLimitMs := cpuLimitMs * wallTimeMultiplier
@@ -465,7 +462,7 @@ func infraErr(format string, args ...any) (model.ExecuteResult, error) {
 		Verdict:   model.VerdictUKE,
 		ExitCode:  -1,
 		ExtraInfo: msg,
-	}, fmt.Errorf("%s", msg)
+	}, errors.New(msg)
 }
 
 func copyFile(src, dst string, perm os.FileMode) error {
@@ -473,21 +470,20 @@ func copyFile(src, dst string, perm os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
 
-	_, err = io.Copy(out, in)
-	return err
+	if _, err = io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
 
-func clampInt(v, max uint64) int {
-	if v > max {
-		return int(max)
-	}
-	return int(v)
+func clampInt(v, limit uint64) int {
+	return int(min(v, limit))
 }

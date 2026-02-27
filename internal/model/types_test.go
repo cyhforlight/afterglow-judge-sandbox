@@ -3,6 +3,9 @@ package model
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestVerdictString(t *testing.T) {
@@ -18,9 +21,7 @@ func TestVerdictString(t *testing.T) {
 		{VerdictUKE, "UnknownError"},
 	}
 	for _, tt := range tests {
-		if got := tt.verdict.String(); got != tt.want {
-			t.Fatalf("verdict %d: got %q, want %q", tt.verdict, got, tt.want)
-		}
+		assert.Equal(t, tt.want, tt.verdict.String(), "verdict %d", tt.verdict)
 	}
 }
 
@@ -30,12 +31,8 @@ func TestVerdictMarshalJSON(t *testing.T) {
 	}{Verdict: VerdictTLE}
 
 	data, err := json.Marshal(src)
-	if err != nil {
-		t.Fatalf("marshal failed: %v", err)
-	}
-	if string(data) != `{"verdict":"TimeLimitExceeded"}` {
-		t.Fatalf("unexpected json: %s", data)
-	}
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"verdict":"TimeLimitExceeded"}`, string(data))
 }
 
 func TestParseLanguage(t *testing.T) {
@@ -53,18 +50,12 @@ func TestParseLanguage(t *testing.T) {
 	}
 	for _, tt := range tests {
 		got, err := ParseLanguage(tt.raw)
-		if err != nil {
-			t.Fatalf("ParseLanguage(%q): unexpected error: %v", tt.raw, err)
-		}
-		if got != tt.want {
-			t.Fatalf("ParseLanguage(%q): got %v, want %v", tt.raw, got, tt.want)
-		}
+		require.NoError(t, err, "ParseLanguage(%q)", tt.raw)
+		assert.Equal(t, tt.want, got, "ParseLanguage(%q)", tt.raw)
 	}
 }
 
 func TestParseLanguageRejectsUnknown(t *testing.T) {
 	_, err := ParseLanguage("COBOL")
-	if err == nil {
-		t.Fatal("expected error for unsupported language")
-	}
+	assert.Error(t, err)
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"afterglow-judge-sandbox/internal/model"
@@ -35,11 +36,12 @@ func NewDispatchRunner(socketPath string) *DispatchRunner {
 func (d *DispatchRunner) Execute(ctx context.Context, req model.ExecuteRequest) (model.ExecuteResult, error) {
 	r, ok := d.runners[req.Language]
 	if !ok {
+		msg := fmt.Sprintf("no runner registered for language %q", req.Language)
 		return model.ExecuteResult{
 			Verdict:   model.VerdictUKE,
 			ExitCode:  -1,
-			ExtraInfo: fmt.Sprintf("no runner registered for language %q", req.Language),
-		}, fmt.Errorf("no runner for language %q", req.Language)
+			ExtraInfo: msg,
+		}, errors.New(msg)
 	}
 	return r.Execute(ctx, req)
 }
