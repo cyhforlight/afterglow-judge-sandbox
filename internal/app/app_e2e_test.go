@@ -20,8 +20,10 @@ import (
 	"afterglow-judge-sandbox/internal/service"
 )
 
-const defaultContainerdSocketPath = "/run/containerd/containerd.sock"
-const defaultRunnerNamespace = "afterglow"
+const (
+	defaultContainerdSocketPath = "/run/containerd/containerd.sock"
+	defaultRunnerNamespace      = "afterglow"
+)
 
 type appRunOutput struct {
 	Verdict    string `json:"verdict"`
@@ -159,9 +161,9 @@ func TestRun_E2E_WithFixturePrograms(t *testing.T) {
 
 	runner := service.NewContainerdRunner(os.Getenv("CONTAINERD_SOCKET"))
 
-	for _, testCase := range tests {
-		t.Run(testCase.name, func(t *testing.T) {
-			programPath := filepath.Join(fixtureRoot, testCase.programRel)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			programPath := filepath.Join(fixtureRoot, tt.programRel)
 			require.FileExists(t, programPath)
 
 			var out bytes.Buffer
@@ -171,9 +173,9 @@ func TestRun_E2E_WithFixturePrograms(t *testing.T) {
 			args := []string{
 				"--exec", programPath,
 				"--input", inputPath,
-				"--lang", testCase.lang,
-				"--time-limit", strconv.Itoa(testCase.timeLimitMs),
-				"--memory-limit", strconv.Itoa(testCase.memoryLimitMB),
+				"--lang", tt.lang,
+				"--time-limit", strconv.Itoa(tt.timeLimitMs),
+				"--memory-limit", strconv.Itoa(tt.memoryLimitMB),
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
@@ -186,11 +188,11 @@ func TestRun_E2E_WithFixturePrograms(t *testing.T) {
 			var got appRunOutput
 			require.NoError(t, json.Unmarshal(out.Bytes(), &got), "raw output: %s", out.String())
 
-			assert.Equal(t, testCase.wantVerdict.String(), got.Verdict)
+			assert.Equal(t, tt.wantVerdict.String(), got.Verdict)
 			assert.GreaterOrEqual(t, got.TimeUsed, 0)
 			assert.GreaterOrEqual(t, got.MemoryUsed, 0)
-			if testCase.wantStdout != "" {
-				assert.Equal(t, testCase.wantStdout, got.Stdout)
+			if tt.wantStdout != "" {
+				assert.Equal(t, tt.wantStdout, got.Stdout)
 			}
 		})
 	}
@@ -236,27 +238,18 @@ func skipIfE2EPrerequisitesMissing(t *testing.T) {
 }
 
 func requiredImageRefs() []string {
-	refs := map[string]struct{}{
-		service.NativeRunProfile().ImageRef: {},
-		service.PythonRunProfile().ImageRef: {},
-		service.JavaRunProfile().ImageRef:   {},
+	return []string{
+		service.NativeRunProfile().ImageRef,
+		service.PythonRunProfile().ImageRef,
+		service.JavaRunProfile().ImageRef,
 	}
-	imageRefs := make([]string, 0, len(refs))
-	for imageRef := range refs {
-		imageRefs = append(imageRefs, imageRef)
-	}
-	return imageRefs
 }
 
 func pathFromRepoRoot(t *testing.T, elements ...string) string {
 	t.Helper()
 
-	base := filepath.Join("..", "..")
-	for _, element := range elements {
-		base = filepath.Join(base, element)
-	}
-
-	path, err := filepath.Abs(base)
+	parts := append([]string{"..", ".."}, elements...)
+	path, err := filepath.Abs(filepath.Join(parts...))
 	require.NoError(t, err)
 	return path
 }

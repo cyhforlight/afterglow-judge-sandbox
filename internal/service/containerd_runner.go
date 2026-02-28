@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -33,6 +34,7 @@ const (
 	defaultNamespace  = "afterglow"
 	cgroupV2CheckPath = "/sys/fs/cgroup/cgroup.controllers"
 	bytesPerMiB       = int64(1024 * 1024)
+	nanosPerMs        = uint64(1_000_000)
 
 	// Wall time is allowed to be this multiple of CPU time limit.
 	// Accounts for I/O waits, scheduling latency, container overhead, etc.
@@ -108,6 +110,7 @@ type ContainerdRunner struct {
 	socketPath string
 	namespace  string
 	profiles   map[model.Language]RunProfile
+	log        *slog.Logger
 
 	checkCgroupV2   func() error
 	checkContainerd func(ctx context.Context, socketPath string) error
@@ -131,6 +134,7 @@ func NewContainerdRunnerWithProfiles(socketPath string, profiles map[model.Langu
 		socketPath:      socketPath,
 		namespace:       defaultNamespace,
 		profiles:        clonedProfiles,
+		log:             slog.Default(),
 		checkCgroupV2:   ensureCgroupV2Enabled,
 		checkContainerd: ensureContainerdAvailable,
 	}
@@ -170,6 +174,7 @@ func (r *ContainerdRunner) PreflightCheck(ctx context.Context) error {
 	if err := r.checkContainerd(ctx, r.socketPath); err != nil {
 		return err
 	}
+	r.log.DebugContext(ctx, "preflight checks passed")
 	return nil
 }
 
@@ -184,19 +189,27 @@ func (r *ContainerdRunner) profileForLanguage(language model.Language) (RunProfi
 func (r *ContainerdRunner) Execute(ctx context.Context, req model.ExecuteRequest) model.ExecuteResult {
 	result, err := r.execute(ctx, req)
 	if err != nil {
+		r.log.ErrorContext(ctx, "execution failed", "error", err)
 		return buildInfraFailureResult(err)
 	}
+	r.log.InfoContext(ctx, "execution complete",
+		"verdict", result.Verdict.String(),
+		"timeUsed", result.TimeUsed,
+		"memoryUsed", result.MemoryUsed,
+	)
 	return result
 }
 
 func (r *ContainerdRunner) ensureImage(ctx context.Context, client *containerd.Client, imageRef string) (containerd.Image, error) {
 	image, err := client.GetImage(ctx, imageRef)
 	if err == nil {
+		r.log.DebugContext(ctx, "image found locally", "ref", imageRef)
 		return image, nil
 	}
 	if !errdefs.IsNotFound(err) {
 		return nil, fmt.Errorf("get image %q: %w", imageRef, err)
 	}
+	r.log.InfoContext(ctx, "pulling image", "ref", imageRef)
 	image, err = client.Pull(ctx, imageRef, containerd.WithPullUnpack)
 	if err != nil {
 		return nil, fmt.Errorf("pull image %q: %w", imageRef, err)
@@ -254,46 +267,61 @@ func (r *ContainerdRunner) prepareExecutionPlan(req model.ExecuteRequest) (execu
 	return plan, nil
 }
 
+// setupExecution acquires all resources needed to run the sandbox process.
+// On success it returns a runningExecution and a cleanup function that the
+// caller must defer. On failure the defer inside this function automatically
+// releases every resource acquired so far (cleanup-stack pattern).
 func (r *ContainerdRunner) setupExecution(
 	ctx context.Context,
 	req model.ExecuteRequest,
 	plan executionPlan,
 ) (runningExecution, func(), error) {
 	var run runningExecution
-	cleanup := func() {}
+	var cleanups []func()
+	succeeded := false
+
+	addCleanup := func(fn func()) { cleanups = append(cleanups, fn) }
+	rollback := func() {
+		for i := len(cleanups) - 1; i >= 0; i-- {
+			cleanups[i]()
+		}
+	}
+	defer func() {
+		if !succeeded {
+			rollback()
+		}
+	}()
 
 	client, err := containerd.New(r.socketPath)
 	if err != nil {
-		return run, cleanup, fmt.Errorf("connect to containerd: %w", err)
+		return run, nil, fmt.Errorf("connect to containerd: %w", err)
 	}
+	addCleanup(func() { _ = client.Close() })
 
 	execCtx := namespaces.WithNamespace(ctx, r.namespace)
 	image, err := r.ensureImage(execCtx, client, plan.profile.ImageRef)
 	if err != nil {
-		_ = client.Close()
-		return run, cleanup, fmt.Errorf("ensure image %q: %w", plan.profile.ImageRef, err)
+		return run, nil, fmt.Errorf("ensure image %q: %w", plan.profile.ImageRef, err)
 	}
 
 	tmpDir, err := os.MkdirTemp("", "sandbox-*")
 	if err != nil {
-		_ = client.Close()
-		return run, cleanup, fmt.Errorf("create temp dir: %w", err)
+		return run, nil, fmt.Errorf("create temp dir: %w", err)
 	}
+	addCleanup(func() { _ = os.RemoveAll(tmpDir) })
+
 	programPath := filepath.Join(tmpDir, plan.profile.SandboxFile)
 	if err := copyFile(req.ExecutablePath, programPath, plan.profile.FileMode); err != nil {
-		_ = os.RemoveAll(tmpDir)
-		_ = client.Close()
-		return run, cleanup, fmt.Errorf("copy program file: %w", err)
+		return run, nil, fmt.Errorf("copy program file: %w", err)
 	}
 
 	inputFile, err := openInputFile(req.InputPath)
 	if err != nil {
-		_ = os.RemoveAll(tmpDir)
-		_ = client.Close()
-		return run, cleanup, err
+		return run, nil, err
 	}
+	addCleanup(func() { _ = inputFile.Close() })
 
-	containerID := fmt.Sprintf("sandbox-%d", time.Now().UnixNano())
+	containerID := generateContainerID()
 	containerPath := "/sandbox/" + plan.profile.SandboxFile
 	args := plan.profile.BuildArgs(containerPath)
 
@@ -315,11 +343,15 @@ func (r *ContainerdRunner) setupExecution(
 		),
 	)
 	if err != nil {
-		_ = inputFile.Close()
-		_ = os.RemoveAll(tmpDir)
-		_ = client.Close()
-		return run, cleanup, fmt.Errorf("create container: %w", err)
+		return run, nil, fmt.Errorf("create container: %w", err)
 	}
+	addCleanup(func() { _ = container.Delete(execCtx, containerd.WithSnapshotCleanup) })
+
+	r.log.DebugContext(ctx, "container created",
+		"id", containerID,
+		"image", plan.profile.ImageRef,
+		"language", req.Language.String(),
+	)
 
 	oleLimiter := newOutputLimiter(plan.outputLimitBytes)
 	stdoutLW := newLimitedWriter(oleLimiter)
@@ -329,29 +361,13 @@ func (r *ContainerdRunner) setupExecution(
 		cio.WithStreams(inputFile, stdoutLW, stderrLW),
 	))
 	if err != nil {
-		_ = container.Delete(execCtx, containerd.WithSnapshotCleanup)
-		_ = inputFile.Close()
-		_ = os.RemoveAll(tmpDir)
-		_ = client.Close()
-		return run, cleanup, fmt.Errorf("create task: %w", err)
+		return run, nil, fmt.Errorf("create task: %w", err)
 	}
+	addCleanup(func() { _, _ = task.Delete(execCtx) })
 
 	exitCh, err := task.Wait(execCtx)
 	if err != nil {
-		_, _ = task.Delete(execCtx)
-		_ = container.Delete(execCtx, containerd.WithSnapshotCleanup)
-		_ = inputFile.Close()
-		_ = os.RemoveAll(tmpDir)
-		_ = client.Close()
-		return run, cleanup, fmt.Errorf("setup wait: %w", err)
-	}
-
-	cleanup = func() {
-		_, _ = task.Delete(execCtx)
-		_ = container.Delete(execCtx, containerd.WithSnapshotCleanup)
-		_ = inputFile.Close()
-		_ = os.RemoveAll(tmpDir)
-		_ = client.Close()
+		return run, nil, fmt.Errorf("setup wait: %w", err)
 	}
 
 	run = runningExecution{
@@ -364,7 +380,9 @@ func (r *ContainerdRunner) setupExecution(
 		limits:           plan.limits,
 		outputLimitBytes: plan.outputLimitBytes,
 	}
-	return run, cleanup, nil
+
+	succeeded = true
+	return run, rollback, nil
 }
 
 func (r *ContainerdRunner) watchExecution(run runningExecution) (model.ExecuteResult, error) {
@@ -419,6 +437,13 @@ func (r *ContainerdRunner) watchExecution(run runningExecution) (model.ExecuteRe
 		run.stdoutLW,
 		run.stderrLW,
 	), nil
+}
+
+// generateContainerID returns a collision-resistant container name using
+// 64 bits of randomness from math/rand/v2 (auto-seeded from crypto/rand
+// in Go 1.22+), avoiding the wall-clock collisions of UnixNano().
+func generateContainerID() string {
+	return fmt.Sprintf("sandbox-%016x", rand.Uint64())
 }
 
 // pickCPU randomly selects a CPU core for the container. Each sandbox
@@ -503,6 +528,14 @@ type cgroupMetrics struct {
 	peakMemBytes    uint64
 	memoryLimitHit  bool
 	oomKillDetected bool
+}
+
+func (m cgroupMetrics) cpuMillis() int {
+	return int(m.cpuNanos / nanosPerMs)
+}
+
+func (m cgroupMetrics) peakMemMB() int {
+	return int(m.peakMemBytes / uint64(bytesPerMiB))
 }
 
 func collectMetrics(ctx context.Context, task containerd.Task) cgroupMetrics {
@@ -631,10 +664,6 @@ func memoryLimitReached(metrics cgroupMetrics, memoryLimitMB int) bool {
 	}
 
 	limitBytes := uint64(memoryLimitMB) * uint64(bytesPerMiB)
-	if limitBytes == 0 {
-		return false
-	}
-
 	if metrics.peakMemBytes >= limitBytes {
 		return true
 	}
@@ -666,8 +695,8 @@ func buildForcedStopVerdict(
 	stdoutLW *limitedWriter,
 	stderrLW *limitedWriter,
 ) model.ExecuteResult {
-	cpuMs := clampInt(metrics.cpuNanos/1e6, uint64(cpuLimitMs))
-	peakMemMB := int(metrics.peakMemBytes / uint64(bytesPerMiB))
+	cpuMs := min(metrics.cpuMillis(), cpuLimitMs)
+	peakMemMB := metrics.peakMemMB()
 
 	if outputOverflowed(stdoutLW, stderrLW) {
 		return model.ExecuteResult{
@@ -702,8 +731,8 @@ func buildVerdict(
 	outputLimitBytes int64,
 	stdoutLW, stderrLW *limitedWriter,
 ) model.ExecuteResult {
-	cpuMs := int(metrics.cpuNanos / 1e6)
-	peakMemMB := int(metrics.peakMemBytes / uint64(bytesPerMiB))
+	cpuMs := metrics.cpuMillis()
+	peakMemMB := metrics.peakMemMB()
 
 	res := model.ExecuteResult{
 		Stdout:     stdoutLW.String(),
@@ -797,8 +826,4 @@ func buildInfraFailureResult(err error) model.ExecuteResult {
 		ExitCode:  -1,
 		ExtraInfo: err.Error(),
 	}
-}
-
-func clampInt(v, limit uint64) int {
-	return int(min(v, limit))
 }

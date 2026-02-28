@@ -363,9 +363,9 @@ func TestMemoryLimitReached(t *testing.T) {
 		},
 	}
 
-	for _, testCase := range tests {
-		t.Run(testCase.name, func(t *testing.T) {
-			assert.Equal(t, testCase.expected, memoryLimitReached(testCase.metrics, testCase.limitMB))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, memoryLimitReached(tt.metrics, tt.limitMB))
 		})
 	}
 }
@@ -398,9 +398,9 @@ func TestRuntimeOOMDetected(t *testing.T) {
 		},
 	}
 
-	for _, testCase := range tests {
-		t.Run(testCase.name, func(t *testing.T) {
-			assert.Equal(t, testCase.expected, runtimeOOMDetected(testCase.stderr))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, runtimeOOMDetected(tt.stderr))
 		})
 	}
 }
@@ -503,11 +503,11 @@ func TestValidateExecuteRequest(t *testing.T) {
 		})
 	}
 
-	for _, testCase := range tests {
-		t.Run(testCase.name, func(t *testing.T) {
-			_, err := validateExecuteRequest(testCase.req)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := validateExecuteRequest(tt.req)
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), testCase.wantErr)
+			assert.Contains(t, err.Error(), tt.wantErr)
 		})
 	}
 }
@@ -572,28 +572,6 @@ func TestParseCgroupMetrics_NonMetricsPayload(t *testing.T) {
 
 	got := parseCgroupMetrics(metricAny)
 	assert.Equal(t, cgroupMetrics{}, got)
-}
-
-// ============================================================
-// clampInt
-// ============================================================
-
-func TestClampInt(t *testing.T) {
-	tests := []struct {
-		name     string
-		v, limit uint64
-		want     int
-	}{
-		{"below limit", 500, 1000, 500},
-		{"at limit", 1000, 1000, 1000},
-		{"above limit", 2000, 1000, 1000},
-		{"zero", 0, 1000, 0},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, clampInt(tt.v, tt.limit))
-		})
-	}
 }
 
 // ============================================================
@@ -688,27 +666,27 @@ func TestContainerdRunner_PreflightCheck(t *testing.T) {
 		},
 	}
 
-	for _, testCase := range tests {
-		t.Run(testCase.name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			runner := NewContainerdRunner("unix:///run/containerd/containerd.sock")
 			runner.checkCgroupV2 = func() error {
-				return testCase.cgroupErr
+				return tt.cgroupErr
 			}
 
 			containerdCheckCalled := false
 			runner.checkContainerd = func(_ context.Context, _ string) error {
 				containerdCheckCalled = true
-				return testCase.containerdErr
+				return tt.containerdErr
 			}
 
 			err := runner.PreflightCheck(context.Background())
-			if testCase.wantErr == "" {
+			if tt.wantErr == "" {
 				assert.NoError(t, err)
 			} else {
 				require.Error(t, err)
-				assert.Contains(t, err.Error(), testCase.wantErr)
+				assert.Contains(t, err.Error(), tt.wantErr)
 			}
-			assert.Equal(t, testCase.wantContainerdCheckCall, containerdCheckCalled)
+			assert.Equal(t, tt.wantContainerdCheckCall, containerdCheckCalled)
 		})
 	}
 }

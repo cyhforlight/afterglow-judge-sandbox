@@ -46,6 +46,10 @@ func (l Language) String() string {
 	}
 }
 
+func (l Language) MarshalJSON() ([]byte, error) {
+	return json.Marshal(l.String())
+}
+
 type Verdict int
 
 const (

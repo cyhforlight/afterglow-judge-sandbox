@@ -65,7 +65,7 @@ func TestRun_Success(t *testing.T) {
 	assert.Equal(t, "/tmp/input.txt", runner.gotReq.InputPath)
 	assert.Equal(t, model.LanguageCPP, runner.gotReq.Language)
 
-	var fields map[string]interface{}
+	var fields map[string]any
 	require.NoError(t, json.Unmarshal(out.Bytes(), &fields), "output=%q", out.String())
 	assert.Equal(t, fixed.Verdict.String(), fields["verdict"])
 	assert.Equal(t, fixed.Stdout, fields["stdout"])
@@ -126,11 +126,11 @@ func TestRun_PreflightCheck(t *testing.T) {
 		},
 	}
 
-	for _, testCase := range tests {
-		t.Run(testCase.name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			runner := &fakeRunner{
 				result:       model.ExecuteResult{Verdict: model.VerdictOK},
-				preflightErr: testCase.preflightErr,
+				preflightErr: tt.preflightErr,
 			}
 
 			var out bytes.Buffer
@@ -145,11 +145,11 @@ func TestRun_PreflightCheck(t *testing.T) {
 				"--memory-limit", "256",
 			})
 
-			assert.Equal(t, testCase.wantExitCode, exitCode)
+			assert.Equal(t, tt.wantExitCode, exitCode)
 			assert.True(t, runner.preflightCalled)
-			assert.Equal(t, testCase.wantExecuteCall, runner.executeCalled)
-			if testCase.wantErrContains != "" {
-				assert.Contains(t, errOut.String(), testCase.wantErrContains)
+			assert.Equal(t, tt.wantExecuteCall, runner.executeCalled)
+			if tt.wantErrContains != "" {
+				assert.Contains(t, errOut.String(), tt.wantErrContains)
 				return
 			}
 			assert.Empty(t, errOut.String())

@@ -46,10 +46,10 @@ func TestParseArgs_ValidationErrors(t *testing.T) {
 		},
 	}
 
-	for _, testCase := range tests {
-		t.Run(testCase.name, func(t *testing.T) {
-			_, err := ParseArgs(testCase.args)
-			assert.EqualError(t, err, testCase.wantErr)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseArgs(tt.args)
+			assert.EqualError(t, err, tt.wantErr)
 		})
 	}
 }

@@ -35,6 +35,16 @@ func TestVerdictMarshalJSON(t *testing.T) {
 	assert.JSONEq(t, `{"verdict":"TimeLimitExceeded"}`, string(data))
 }
 
+func TestLanguageMarshalJSON(t *testing.T) {
+	src := struct {
+		Language Language `json:"language"`
+	}{Language: LanguageCPP}
+
+	data, err := json.Marshal(src)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"language":"C++"}`, string(data))
+}
+
 func TestParseLanguage(t *testing.T) {
 	tests := []struct {
 		raw  string
