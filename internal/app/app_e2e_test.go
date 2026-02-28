@@ -157,7 +157,7 @@ func TestRun_E2E_WithFixturePrograms(t *testing.T) {
 		},
 	}
 
-	runner := service.NewDispatchRunner(os.Getenv("CONTAINERD_SOCKET"))
+	runner := service.NewContainerdRunner(os.Getenv("CONTAINERD_SOCKET"))
 
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"io"
 
 	"afterglow-judge-sandbox/internal/cli"
+	"afterglow-judge-sandbox/internal/model"
 	"afterglow-judge-sandbox/internal/service"
 )
 
@@ -37,19 +38,12 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return 2
 	}
 
-	checker, ok := a.runner.(service.PreflightChecker)
-	if ok {
-		if err := checker.PreflightCheck(ctx); err != nil {
-			_, _ = fmt.Fprintf(a.errOut, "environment check failed: %v\n", err)
-			return 1
-		}
-	}
-
-	result, err := a.runner.Execute(ctx, req)
-	if err != nil {
-		_, _ = fmt.Fprintf(a.errOut, "runner error: %v\n", err)
+	if err := a.runner.PreflightCheck(ctx); err != nil {
+		_, _ = fmt.Fprintf(a.errOut, "environment check failed: %v\n", err)
 		return 1
 	}
+
+	result := a.runner.Execute(ctx, req)
 
 	encoded, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
@@ -57,5 +51,8 @@ func (a *App) Run(ctx context.Context, args []string) int {
 		return 1
 	}
 	_, _ = fmt.Fprintln(a.out, string(encoded))
+	if result.Verdict == model.VerdictUKE {
+		return 1
+	}
 	return 0
 }

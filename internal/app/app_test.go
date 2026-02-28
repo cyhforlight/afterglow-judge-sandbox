@@ -16,31 +16,25 @@ import (
 type fakeRunner struct {
 	gotReq model.ExecuteRequest
 	result model.ExecuteResult
-	err    error
+
+	preflightErr    error
+	preflightCalled bool
 
 	executeCalled bool
 }
 
-func (f *fakeRunner) Execute(_ context.Context, req model.ExecuteRequest) (model.ExecuteResult, error) {
-	f.executeCalled = true
-	f.gotReq = req
-	return f.result, f.err
-}
-
-var _ service.Runner = (*fakeRunner)(nil)
-
-type fakePreflightRunner struct {
-	fakeRunner
-	preflightErr    error
-	preflightCalled bool
-}
-
-func (f *fakePreflightRunner) PreflightCheck(_ context.Context) error {
+func (f *fakeRunner) PreflightCheck(_ context.Context) error {
 	f.preflightCalled = true
 	return f.preflightErr
 }
 
-var _ service.PreflightChecker = (*fakePreflightRunner)(nil)
+func (f *fakeRunner) Execute(_ context.Context, req model.ExecuteRequest) model.ExecuteResult {
+	f.executeCalled = true
+	f.gotReq = req
+	return f.result
+}
+
+var _ service.Runner = (*fakeRunner)(nil)
 
 func TestRun_Success(t *testing.T) {
 	fixed := model.ExecuteResult{
@@ -65,6 +59,7 @@ func TestRun_Success(t *testing.T) {
 		"--memory-limit", "256",
 	})
 	require.Equal(t, 0, exitCode, "stderr=%s", errOut.String())
+	assert.True(t, runner.preflightCalled)
 
 	assert.Equal(t, "/tmp/a.out", runner.gotReq.ExecutablePath)
 	assert.Equal(t, "/tmp/input.txt", runner.gotReq.InputPath)
@@ -90,6 +85,7 @@ func TestRun_InvalidArgs(t *testing.T) {
 		"--memory-limit", "256",
 	})
 	assert.Equal(t, 2, exitCode)
+	assert.False(t, runner.preflightCalled)
 }
 
 func TestRun_Help(t *testing.T) {
@@ -101,6 +97,7 @@ func TestRun_Help(t *testing.T) {
 
 	exitCode := application.Run(context.Background(), []string{"--help"})
 	assert.Equal(t, 0, exitCode)
+	assert.False(t, runner.preflightCalled)
 	assert.NotEmpty(t, out.String(), "expected usage output on stdout")
 	assert.Empty(t, errOut.String(), "unexpected stderr output")
 }
@@ -131,10 +128,8 @@ func TestRun_PreflightCheck(t *testing.T) {
 
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			runner := &fakePreflightRunner{
-				fakeRunner: fakeRunner{
-					result: model.ExecuteResult{Verdict: model.VerdictOK},
-				},
+			runner := &fakeRunner{
+				result:       model.ExecuteResult{Verdict: model.VerdictOK},
 				preflightErr: testCase.preflightErr,
 			}
 
@@ -160,4 +155,36 @@ func TestRun_PreflightCheck(t *testing.T) {
 			assert.Empty(t, errOut.String())
 		})
 	}
+}
+
+func TestRun_InfraFailureVerdictUKE(t *testing.T) {
+	runner := &fakeRunner{
+		result: model.ExecuteResult{
+			Verdict:   model.VerdictUKE,
+			ExitCode:  -1,
+			ExtraInfo: "connect to containerd: permission denied",
+		},
+	}
+
+	var out bytes.Buffer
+	var errOut bytes.Buffer
+	application := New(runner, &out, &errOut)
+
+	exitCode := application.Run(context.Background(), []string{
+		"--exec", "/tmp/a.out",
+		"--input", "/tmp/input.txt",
+		"--lang", "C++",
+		"--time-limit", "1000",
+		"--memory-limit", "256",
+	})
+
+	assert.Equal(t, 1, exitCode)
+	assert.True(t, runner.preflightCalled)
+	assert.True(t, runner.executeCalled)
+	assert.Empty(t, errOut.String())
+
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(out.Bytes(), &got))
+	assert.Equal(t, model.VerdictUKE.String(), got["verdict"])
+	assert.Equal(t, float64(-1), got["exitCode"])
 }

@@ -3,13 +3,14 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	cgroupsv1 "github.com/containerd/cgroups/v3/cgroup1/stats"
 	cgroupsv2 "github.com/containerd/cgroups/v3/cgroup2/stats"
 	typeurl "github.com/containerd/typeurl/v2"
 	"github.com/stretchr/testify/assert"
@@ -390,6 +391,11 @@ func TestRuntimeOOMDetected(t *testing.T) {
 			stderr:   "segmentation fault",
 			expected: false,
 		},
+		{
+			name:     "plain out of memory text",
+			stderr:   "fatal: out of memory while allocating",
+			expected: true,
+		},
 	}
 
 	for _, testCase := range tests {
@@ -397,6 +403,138 @@ func TestRuntimeOOMDetected(t *testing.T) {
 			assert.Equal(t, testCase.expected, runtimeOOMDetected(testCase.stderr))
 		})
 	}
+}
+
+// ============================================================
+// request validation + input checks
+// ============================================================
+
+func TestValidateExecuteRequest(t *testing.T) {
+	validReq := model.ExecuteRequest{
+		ExecutablePath: "/tmp/program",
+		InputPath:      "/tmp/input.txt",
+		TimeLimit:      1000,
+		MemoryLimit:    256,
+	}
+
+	limits, err := validateExecuteRequest(validReq)
+	require.NoError(t, err)
+	assert.Equal(t, validReq.TimeLimit, limits.cpuLimitMs)
+	assert.Equal(t, validReq.TimeLimit*wallTimeMultiplier, limits.wallLimitMs)
+	assert.Equal(t, validReq.MemoryLimit, limits.memoryLimitMB)
+	assert.Equal(t, int64(validReq.MemoryLimit)*bytesPerMiB, limits.memoryLimitBytes)
+
+	tests := []struct {
+		name    string
+		req     model.ExecuteRequest
+		wantErr string
+	}{
+		{
+			name: "missing executable path",
+			req: model.ExecuteRequest{
+				InputPath:   "/tmp/input.txt",
+				TimeLimit:   1000,
+				MemoryLimit: 256,
+			},
+			wantErr: "missing executable path",
+		},
+		{
+			name: "missing input path",
+			req: model.ExecuteRequest{
+				ExecutablePath: "/tmp/program",
+				TimeLimit:      1000,
+				MemoryLimit:    256,
+			},
+			wantErr: "missing input path",
+		},
+		{
+			name: "non-positive time limit",
+			req: model.ExecuteRequest{
+				ExecutablePath: "/tmp/program",
+				InputPath:      "/tmp/input.txt",
+				TimeLimit:      0,
+				MemoryLimit:    256,
+			},
+			wantErr: "time limit must be > 0",
+		},
+		{
+			name: "non-positive memory limit",
+			req: model.ExecuteRequest{
+				ExecutablePath: "/tmp/program",
+				InputPath:      "/tmp/input.txt",
+				TimeLimit:      1000,
+				MemoryLimit:    0,
+			},
+			wantErr: "memory limit must be > 0",
+		},
+	}
+
+	maxIntValue := int(^uint(0) >> 1)
+	if int64(maxIntValue) > maxTimeLimitMs {
+		tests = append(tests, struct {
+			name    string
+			req     model.ExecuteRequest
+			wantErr string
+		}{
+			name: "time limit too large",
+			req: model.ExecuteRequest{
+				ExecutablePath: "/tmp/program",
+				InputPath:      "/tmp/input.txt",
+				TimeLimit:      maxIntValue,
+				MemoryLimit:    256,
+			},
+			wantErr: "time limit too large",
+		})
+	}
+	if int64(maxIntValue) > maxMemoryLimitMB {
+		tests = append(tests, struct {
+			name    string
+			req     model.ExecuteRequest
+			wantErr string
+		}{
+			name: "memory limit too large",
+			req: model.ExecuteRequest{
+				ExecutablePath: "/tmp/program",
+				InputPath:      "/tmp/input.txt",
+				TimeLimit:      1000,
+				MemoryLimit:    maxIntValue,
+			},
+			wantErr: "memory limit too large",
+		})
+	}
+
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := validateExecuteRequest(testCase.req)
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), testCase.wantErr)
+		})
+	}
+}
+
+func TestOpenInputFile(t *testing.T) {
+	tempDir := t.TempDir()
+
+	okPath := filepath.Join(tempDir, "ok.in")
+	require.NoError(t, os.WriteFile(okPath, []byte("42\n"), 0o644))
+
+	okFile, err := openInputFile(okPath)
+	require.NoError(t, err)
+	require.NoError(t, okFile.Close())
+
+	_, err = openInputFile(tempDir)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "directory")
+
+	tooLargePath := filepath.Join(tempDir, "large.in")
+	tooLargeFile, err := os.Create(tooLargePath)
+	require.NoError(t, err)
+	require.NoError(t, tooLargeFile.Truncate(maxInputSize+1))
+	require.NoError(t, tooLargeFile.Close())
+
+	_, err = openInputFile(tooLargePath)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "too large")
 }
 
 // ============================================================
@@ -426,31 +564,14 @@ func TestParseCgroupMetrics_V2(t *testing.T) {
 	assert.True(t, got.oomKillDetected)
 }
 
-func TestParseCgroupMetrics_V1Fallback(t *testing.T) {
-	metricAny, err := typeurl.MarshalAny(&cgroupsv1.Metrics{
-		CPU: &cgroupsv1.CPUStat{
-			Usage: &cgroupsv1.CPUUsage{
-				Total: 5678,
-			},
-		},
-		Memory: &cgroupsv1.MemoryStat{
-			Usage: &cgroupsv1.MemoryEntry{
-				Usage:   100,
-				Max:     300,
-				Failcnt: 5,
-			},
-		},
-		MemoryOomControl: &cgroupsv1.MemoryOomControl{
-			OomKill: 1,
-		},
+func TestParseCgroupMetrics_NonMetricsPayload(t *testing.T) {
+	metricAny, err := typeurl.MarshalAny(&cgroupsv2.CPUStat{
+		UsageUsec: 5678,
 	})
 	require.NoError(t, err)
 
 	got := parseCgroupMetrics(metricAny)
-	assert.Equal(t, uint64(5678), got.cpuNanos)
-	assert.Equal(t, uint64(300), got.peakMemBytes)
-	assert.True(t, got.memoryLimitHit)
-	assert.True(t, got.oomKillDetected)
+	assert.Equal(t, cgroupMetrics{}, got)
 }
 
 // ============================================================
@@ -508,13 +629,36 @@ func TestRunProfiles(t *testing.T) {
 }
 
 // ============================================================
-// DispatchRunner
+// ContainerdRunner: routing + preflight
 // ============================================================
 
-func TestDispatchRunner_UnknownLanguage(t *testing.T) {
-	d := &DispatchRunner{runners: map[model.Language]Runner{}}
-	_, err := d.Execute(context.Background(), model.ExecuteRequest{Language: model.LanguageUnknown})
-	assert.Error(t, err)
+func TestContainerdRunner_PrepareExecutionPlan(t *testing.T) {
+	runner := NewContainerdRunnerWithProfiles("unix:///run/containerd/containerd.sock", defaultRunProfiles())
+	req := model.ExecuteRequest{
+		ExecutablePath: "/tmp/program",
+		InputPath:      "/tmp/input.txt",
+		Language:       model.LanguageCPP,
+		TimeLimit:      1000,
+		MemoryLimit:    512,
+	}
+
+	plan, err := runner.prepareExecutionPlan(req)
+	require.NoError(t, err)
+	assert.Equal(t, req.TimeLimit, plan.limits.cpuLimitMs)
+	assert.Equal(t, req.TimeLimit*wallTimeMultiplier, plan.limits.wallLimitMs)
+	assert.Equal(t, int64(req.MemoryLimit)*bytesPerMiB, plan.limits.memoryLimitBytes)
+	assert.Equal(t, defaultOutputLimitBytes, plan.outputLimitBytes)
+	assert.NotEqual(t, plan.limits.memoryLimitBytes, plan.outputLimitBytes)
+}
+
+func TestContainerdRunner_Execute_UnknownLanguage(t *testing.T) {
+	runner := NewContainerdRunnerWithProfiles("unix:///run/containerd/containerd.sock", map[model.Language]RunProfile{})
+	result := runner.Execute(context.Background(), model.ExecuteRequest{
+		Language: model.LanguageUnknown,
+	})
+	assert.Equal(t, model.VerdictUKE, result.Verdict)
+	assert.Equal(t, -1, result.ExitCode)
+	assert.Contains(t, result.ExtraInfo, "no run profile registered")
 }
 
 func TestContainerdRunner_PreflightCheck(t *testing.T) {
@@ -546,7 +690,7 @@ func TestContainerdRunner_PreflightCheck(t *testing.T) {
 
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
-			runner := NewContainerdRunner("unix:///run/containerd/containerd.sock", NativeRunProfile())
+			runner := NewContainerdRunner("unix:///run/containerd/containerd.sock")
 			runner.checkCgroupV2 = func() error {
 				return testCase.cgroupErr
 			}
@@ -565,62 +709,6 @@ func TestContainerdRunner_PreflightCheck(t *testing.T) {
 				assert.Contains(t, err.Error(), testCase.wantErr)
 			}
 			assert.Equal(t, testCase.wantContainerdCheckCall, containerdCheckCalled)
-		})
-	}
-}
-
-type preflightStubRunner struct {
-	executeErr   error
-	preflightErr error
-	called       bool
-}
-
-func (r *preflightStubRunner) Execute(_ context.Context, _ model.ExecuteRequest) (model.ExecuteResult, error) {
-	return model.ExecuteResult{}, r.executeErr
-}
-
-func (r *preflightStubRunner) PreflightCheck(_ context.Context) error {
-	r.called = true
-	return r.preflightErr
-}
-
-func TestDispatchRunner_PreflightCheck(t *testing.T) {
-	tests := []struct {
-		name         string
-		preflightErr error
-		wantErr      string
-	}{
-		{
-			name:         "propagate preflight error",
-			preflightErr: errors.New("containerd denied"),
-			wantErr:      "containerd denied",
-		},
-		{
-			name:         "preflight passed",
-			preflightErr: nil,
-			wantErr:      "",
-		},
-	}
-
-	for _, testCase := range tests {
-		t.Run(testCase.name, func(t *testing.T) {
-			stub := &preflightStubRunner{
-				preflightErr: testCase.preflightErr,
-			}
-			dispatch := &DispatchRunner{
-				runners: map[model.Language]Runner{
-					model.LanguageCPP: stub,
-				},
-			}
-
-			err := dispatch.PreflightCheck(context.Background())
-			if testCase.wantErr == "" {
-				assert.NoError(t, err)
-			} else {
-				require.Error(t, err)
-				assert.Contains(t, err.Error(), testCase.wantErr)
-			}
-			assert.True(t, stub.called)
 		})
 	}
 }

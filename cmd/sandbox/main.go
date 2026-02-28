@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	runner := service.NewDispatchRunner(os.Getenv("CONTAINERD_SOCKET"))
+	runner := service.NewContainerdRunner(os.Getenv("CONTAINERD_SOCKET"))
 	application := app.New(runner, os.Stdout, os.Stderr)
 	os.Exit(application.Run(context.Background(), os.Args[1:]))
 }
