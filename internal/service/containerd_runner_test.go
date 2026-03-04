@@ -5,7 +5,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -330,6 +332,68 @@ func TestBuildForcedStopVerdict_TLEWhenMemoryNotHit(t *testing.T) {
 	assert.Equal(t, model.VerdictTLE, res.Verdict)
 }
 
+func TestBuildForcedStopVerdict_OLEOverMLE(t *testing.T) {
+	stdout, stderr := makeLimitedWriters(10)
+	_, _ = stdout.Write([]byte("overflow output"))
+
+	res := buildForcedStopVerdict(
+		"wall time limit exceeded",
+		9000,
+		3000,
+		128,
+		10,
+		cgroupMetrics{
+			cpuNanos:       2_000_000_000,
+			peakMemBytes:   134_213_632,
+			memoryLimitHit: true,
+		},
+		stdout,
+		stderr,
+	)
+
+	assert.Equal(t, model.VerdictOLE, res.Verdict, "OLE should take priority over MLE in forced stop")
+}
+
+func TestBuildForcedStopVerdict_CPUTimeCapped(t *testing.T) {
+	stdout, stderr := makeLimitedWriters(1024)
+	res := buildForcedStopVerdict(
+		"wall time limit exceeded",
+		9000,
+		3000,
+		256,
+		1024,
+		cgroupMetrics{
+			cpuNanos:     5_000_000_000, // 5000ms > 3000ms limit
+			peakMemBytes: 32 * 1024 * 1024,
+		},
+		stdout,
+		stderr,
+	)
+
+	assert.Equal(t, model.VerdictTLE, res.Verdict)
+	assert.Equal(t, 3000, res.TimeUsed, "CPU time should be capped at limit")
+}
+
+func TestBuildForcedStopVerdict_OOMKillDetected(t *testing.T) {
+	stdout, stderr := makeLimitedWriters(1024)
+	res := buildForcedStopVerdict(
+		"wall time limit exceeded",
+		9000,
+		3000,
+		128,
+		1024,
+		cgroupMetrics{
+			cpuNanos:        2_000_000_000,
+			peakMemBytes:    100 * 1024 * 1024,
+			oomKillDetected: true,
+		},
+		stdout,
+		stderr,
+	)
+
+	assert.Equal(t, model.VerdictMLE, res.Verdict, "OOM kill should trigger MLE")
+}
+
 func TestMemoryLimitReached(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -359,6 +423,46 @@ func TestMemoryLimitReached(t *testing.T) {
 				peakMemBytes: 64 * 1024 * 1024,
 			},
 			limitMB:  128,
+			expected: false,
+		},
+		{
+			name: "usage exactly at 99.5% threshold (should hit)",
+			metrics: cgroupMetrics{
+				peakMemBytes: 133_546_640, // ceil(128MB * 995 / 1000)
+			},
+			limitMB:  128,
+			expected: true,
+		},
+		{
+			name: "usage just below 99.5% threshold (should not hit)",
+			metrics: cgroupMetrics{
+				peakMemBytes: 133_546_639, // ceil(128MB * 995 / 1000) - 1
+			},
+			limitMB:  128,
+			expected: false,
+		},
+		{
+			name: "usage exactly at limit",
+			metrics: cgroupMetrics{
+				peakMemBytes: 128 * 1024 * 1024,
+			},
+			limitMB:  128,
+			expected: true,
+		},
+		{
+			name: "zero limit should not trigger",
+			metrics: cgroupMetrics{
+				peakMemBytes: 1024 * 1024,
+			},
+			limitMB:  0,
+			expected: false,
+		},
+		{
+			name: "negative limit should not trigger",
+			metrics: cgroupMetrics{
+				peakMemBytes: 1024 * 1024,
+			},
+			limitMB:  -1,
 			expected: false,
 		},
 	}
@@ -637,6 +741,220 @@ func TestContainerdRunner_Execute_UnknownLanguage(t *testing.T) {
 	assert.Equal(t, model.VerdictUKE, result.Verdict)
 	assert.Equal(t, -1, result.ExitCode)
 	assert.Contains(t, result.ExtraInfo, "no run profile registered")
+}
+
+// ============================================================
+// verdict priority edge cases
+// ============================================================
+
+func TestBuildVerdict_Priority_OLE_Over_TLE(t *testing.T) {
+	stdout, stderr := makeLimitedWriters(5)
+	_, _ = stdout.Write([]byte("overflow"))
+
+	res := buildVerdict(0, 100*time.Millisecond, cgroupMetrics{
+		cpuNanos:     3_000_000_000, // 3000ms > 2000ms limit
+		peakMemBytes: 10 * 1024 * 1024,
+	}, 2000, 256, 5, stdout, stderr)
+
+	assert.Equal(t, model.VerdictOLE, res.Verdict, "OLE should take priority over TLE")
+}
+
+func TestBuildVerdict_Priority_MLE_Over_TLE(t *testing.T) {
+	stdout, stderr := makeLimitedWriters(1024)
+	_, _ = stderr.Write([]byte("OutOfMemoryError"))
+
+	res := buildVerdict(1, 3*time.Second, cgroupMetrics{
+		cpuNanos:     2_500_000_000, // 2500ms > 2000ms limit
+		peakMemBytes: 256 * 1024 * 1024,
+	}, 2000, 256, 1024, stdout, stderr)
+
+	assert.Equal(t, model.VerdictMLE, res.Verdict, "MLE should take priority over TLE")
+}
+
+func TestBuildVerdict_Priority_TLE_Over_RE(t *testing.T) {
+	stdout, stderr := makeLimitedWriters(1024)
+	_, _ = stderr.Write([]byte("some error"))
+
+	res := buildVerdict(1, 3*time.Second, cgroupMetrics{
+		cpuNanos:     2_500_000_000, // exceeds limit
+		peakMemBytes: 10 * 1024 * 1024,
+	}, 2000, 256, 1024, stdout, stderr)
+
+	assert.Equal(t, model.VerdictTLE, res.Verdict, "TLE should take priority over RE")
+}
+
+func TestBuildVerdict_MLE_Exit137_WithMemoryAtLimit(t *testing.T) {
+	stdout, stderr := makeLimitedWriters(1024)
+
+	res := buildVerdict(137, 500*time.Millisecond, cgroupMetrics{
+		cpuNanos:     400_000_000,
+		peakMemBytes: 127 * 1024 * 1024, // just below 128MB but exit 137
+	}, 2000, 128, 1024, stdout, stderr)
+
+	assert.Equal(t, model.VerdictMLE, res.Verdict, "exit 137 should trigger MLE")
+}
+
+func TestBuildVerdict_MLE_NonZeroExitWithMemoryAtLimit(t *testing.T) {
+	stdout, stderr := makeLimitedWriters(1024)
+
+	res := buildVerdict(1, 500*time.Millisecond, cgroupMetrics{
+		cpuNanos:       400_000_000,
+		peakMemBytes:   134_213_632, // ~128MB at 99.5%+
+		memoryLimitHit: true,
+	}, 2000, 128, 1024, stdout, stderr)
+
+	assert.Equal(t, model.VerdictMLE, res.Verdict, "non-zero exit + memory at limit should be MLE")
+}
+
+// ============================================================
+// helper functions
+// ============================================================
+
+func TestGenerateContainerID(t *testing.T) {
+	ids := make(map[string]bool)
+	for range 1000 {
+		id := generateContainerID()
+		assert.True(t, strings.HasPrefix(id, "sandbox-"), "ID should have sandbox- prefix")
+		assert.Len(t, id, len("sandbox-")+16, "ID should be sandbox- + 16 hex chars")
+		assert.False(t, ids[id], "IDs should be unique")
+		ids[id] = true
+	}
+}
+
+func TestPickCPU(t *testing.T) {
+	for range 100 {
+		cpu := pickCPU()
+		cpuNum, err := strconv.Atoi(cpu)
+		require.NoError(t, err, "pickCPU should return a valid integer string")
+		assert.GreaterOrEqual(t, cpuNum, 0, "CPU number should be non-negative")
+		assert.Less(t, cpuNum, runtime.NumCPU(), "CPU number should be less than NumCPU")
+	}
+}
+
+func TestCopyFile(t *testing.T) {
+	tempDir := t.TempDir()
+	srcPath := filepath.Join(tempDir, "source.txt")
+	dstPath := filepath.Join(tempDir, "dest.txt")
+
+	content := []byte("test content\n")
+	require.NoError(t, os.WriteFile(srcPath, content, 0o644))
+
+	err := copyFile(srcPath, dstPath, 0o755)
+	require.NoError(t, err)
+
+	gotContent, err := os.ReadFile(dstPath)
+	require.NoError(t, err)
+	assert.Equal(t, content, gotContent)
+
+	info, err := os.Stat(dstPath)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o755), info.Mode().Perm())
+}
+
+func TestCopyFile_SourceNotExist(t *testing.T) {
+	tempDir := t.TempDir()
+	err := copyFile("/nonexistent/file", filepath.Join(tempDir, "dest"), 0o644)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "open source file")
+}
+
+func TestOutputLimitExceededText(t *testing.T) {
+	text := outputLimitExceededText(16 * 1024 * 1024)
+	assert.Contains(t, text, "output limit exceeded")
+	assert.Contains(t, text, "16777216")
+}
+
+func TestMemoryLimitExceededText(t *testing.T) {
+	text := memoryLimitExceededText(130, 128)
+	assert.Contains(t, text, "memory limit exceeded")
+	assert.Contains(t, text, "130")
+	assert.Contains(t, text, "128")
+}
+
+func TestBuildInfraFailureResult(t *testing.T) {
+	err := errors.New("containerd connection failed")
+	res := buildInfraFailureResult(err)
+
+	assert.Equal(t, model.VerdictUKE, res.Verdict)
+	assert.Equal(t, -1, res.ExitCode)
+	assert.Contains(t, res.ExtraInfo, "containerd connection failed")
+}
+
+func TestCgroupMetrics_Conversions(t *testing.T) {
+	m := cgroupMetrics{
+		cpuNanos:     1_234_567_890,
+		peakMemBytes: 128 * 1024 * 1024,
+	}
+
+	assert.Equal(t, 1234, m.cpuMillis())
+	assert.Equal(t, 128, m.peakMemMB())
+}
+
+func TestSandboxSecurityOpts(t *testing.T) {
+	// This test verifies that sandboxSecurityOpts returns a valid SpecOpts
+	// We can't easily test the actual OCI spec modifications without a full
+	// container setup, but we can at least verify it doesn't panic
+	opts := sandboxSecurityOpts()
+	assert.NotNil(t, opts, "sandboxSecurityOpts should return non-nil")
+}
+
+func TestCollectMetrics_NilTask(t *testing.T) {
+	// collectMetrics should handle errors gracefully
+	// We can't easily mock containerd.Task, but we can verify the function exists
+	// and returns zero metrics on error (tested indirectly through other tests)
+	t.Skip("collectMetrics requires containerd.Task interface, tested via E2E")
+}
+
+func TestDefaultRunProfiles(t *testing.T) {
+	profiles := defaultRunProfiles()
+
+	assert.Contains(t, profiles, model.LanguageC)
+	assert.Contains(t, profiles, model.LanguageCPP)
+	assert.Contains(t, profiles, model.LanguageJava)
+	assert.Contains(t, profiles, model.LanguagePython)
+
+	// C and C++ should share the same native profile
+	assert.Equal(t, profiles[model.LanguageC].ImageRef, profiles[model.LanguageCPP].ImageRef)
+	assert.Equal(t, profiles[model.LanguageC].SandboxFile, profiles[model.LanguageCPP].SandboxFile)
+}
+
+func TestNewContainerdRunner_DefaultSocket(t *testing.T) {
+	runner := NewContainerdRunner("")
+	assert.NotNil(t, runner)
+	// Should use default socket path when empty string provided
+}
+
+func TestNewContainerdRunnerWithProfiles_ClonesProfiles(t *testing.T) {
+	originalProfiles := map[model.Language]RunProfile{
+		model.LanguageC: NativeRunProfile(),
+	}
+
+	runner := NewContainerdRunnerWithProfiles("/run/containerd/containerd.sock", originalProfiles)
+
+	// Modify original map
+	originalProfiles[model.LanguagePython] = PythonRunProfile()
+
+	// Runner should have its own copy
+	_, hasPython := runner.profiles[model.LanguagePython]
+	assert.False(t, hasPython, "runner should have cloned profiles, not reference original")
+}
+
+func TestOutputOverflowed(t *testing.T) {
+	lim := newOutputLimiter(10)
+	stdout := newLimitedWriter(lim)
+	stderr := newLimitedWriter(lim)
+
+	assert.False(t, outputOverflowed(stdout, stderr), "should not overflow initially")
+
+	_, _ = stdout.Write([]byte("this is too long"))
+	assert.True(t, outputOverflowed(stdout, stderr), "should detect stdout overflow")
+
+	lim2 := newOutputLimiter(10)
+	stdout2 := newLimitedWriter(lim2)
+	stderr2 := newLimitedWriter(lim2)
+
+	_, _ = stderr2.Write([]byte("this is too long"))
+	assert.True(t, outputOverflowed(stdout2, stderr2), "should detect stderr overflow")
 }
 
 func TestContainerdRunner_PreflightCheck(t *testing.T) {
