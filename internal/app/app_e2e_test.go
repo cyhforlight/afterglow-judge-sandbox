@@ -34,6 +34,7 @@ type appRunOutput struct {
 	ExtraInfo  string `json:"extraInfo"`
 }
 
+//nolint:funlen // E2E test requires comprehensive scenarios
 func TestRun_E2E_WithFixturePrograms(t *testing.T) {
 	skipIfE2EPrerequisitesMissing(t)
 

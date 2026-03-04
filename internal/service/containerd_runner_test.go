@@ -394,6 +394,7 @@ func TestBuildForcedStopVerdict_OOMKillDetected(t *testing.T) {
 	assert.Equal(t, model.VerdictMLE, res.Verdict, "OOM kill should trigger MLE")
 }
 
+//nolint:funlen // Table-driven test with comprehensive edge cases
 func TestMemoryLimitReached(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -513,6 +514,7 @@ func TestRuntimeOOMDetected(t *testing.T) {
 // request validation + input checks
 // ============================================================
 
+//nolint:funlen // Table-driven test with comprehensive validation cases
 func TestValidateExecuteRequest(t *testing.T) {
 	validReq := model.ExecuteRequest{
 		ExecutablePath: "/tmp/program",
@@ -620,6 +622,7 @@ func TestOpenInputFile(t *testing.T) {
 	tempDir := t.TempDir()
 
 	okPath := filepath.Join(tempDir, "ok.in")
+	//nolint:gosec // G306: test file with standard permissions
 	require.NoError(t, os.WriteFile(okPath, []byte("42\n"), 0o644))
 
 	okFile, err := openInputFile(okPath)
@@ -631,11 +634,13 @@ func TestOpenInputFile(t *testing.T) {
 	assert.Contains(t, err.Error(), "directory")
 
 	tooLargePath := filepath.Join(tempDir, "large.in")
+	//nolint:gosec // G304: test file path from controlled temp directory
 	tooLargeFile, err := os.Create(tooLargePath)
 	require.NoError(t, err)
 	require.NoError(t, tooLargeFile.Truncate(maxInputSize+1))
 	require.NoError(t, tooLargeFile.Close())
 
+	//nolint:gosec // G304: test file path from controlled temp directory
 	_, err = openInputFile(tooLargePath)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "too large")
@@ -837,11 +842,14 @@ func TestCopyFile(t *testing.T) {
 	dstPath := filepath.Join(tempDir, "dest.txt")
 
 	content := []byte("test content\n")
+	//nolint:gosec // G306: test file with standard permissions
 	require.NoError(t, os.WriteFile(srcPath, content, 0o644))
 
+	//nolint:gosec // G304: test file path from controlled temp directory
 	err := copyFile(srcPath, dstPath, 0o755)
 	require.NoError(t, err)
 
+	//nolint:gosec // G304: test file path from controlled temp directory
 	gotContent, err := os.ReadFile(dstPath)
 	require.NoError(t, err)
 	assert.Equal(t, content, gotContent)
@@ -999,7 +1007,7 @@ func TestContainerdRunner_PreflightCheck(t *testing.T) {
 
 			err := runner.PreflightCheck(context.Background())
 			if tt.wantErr == "" {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 			} else {
 				require.Error(t, err)
 				assert.Contains(t, err.Error(), tt.wantErr)

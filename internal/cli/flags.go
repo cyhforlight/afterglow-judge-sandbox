@@ -1,3 +1,4 @@
+// Package cli handles command-line argument parsing and validation.
 package cli
 
 import (
@@ -10,6 +11,7 @@ import (
 	"afterglow-judge-sandbox/internal/model"
 )
 
+// Usage returns the CLI usage string.
 func Usage() string {
 	return strings.TrimSpace(`
 Usage:
@@ -24,6 +26,7 @@ Flags:
 `)
 }
 
+// ParseArgs parses command-line arguments into an ExecuteRequest.
 func ParseArgs(args []string) (model.ExecuteRequest, error) {
 	var req model.ExecuteRequest
 	var languageRaw string

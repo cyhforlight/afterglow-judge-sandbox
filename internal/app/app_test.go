@@ -186,5 +186,5 @@ func TestRun_InfraFailureVerdictUKE(t *testing.T) {
 	var got map[string]any
 	require.NoError(t, json.Unmarshal(out.Bytes(), &got))
 	assert.Equal(t, model.VerdictUKE.String(), got["verdict"])
-	assert.Equal(t, float64(-1), got["exitCode"])
+	assert.InDelta(t, float64(-1), got["exitCode"], 0.0001)
 }

@@ -1,3 +1,4 @@
+// Package app implements the application layer for the sandbox CLI.
 package app
 
 import (
@@ -13,12 +14,14 @@ import (
 	"afterglow-judge-sandbox/internal/service"
 )
 
+// App coordinates CLI parsing, execution, and output formatting.
 type App struct {
 	runner service.Runner
 	out    io.Writer
 	errOut io.Writer
 }
 
+// New creates a new App instance with the given runner and output streams.
 func New(runner service.Runner, out, errOut io.Writer) *App {
 	return &App{
 		runner: runner,
@@ -27,6 +30,7 @@ func New(runner service.Runner, out, errOut io.Writer) *App {
 	}
 }
 
+// Run executes the sandbox command with the given arguments and returns an exit code.
 func (a *App) Run(ctx context.Context, args []string) int {
 	req, err := cli.ParseArgs(args)
 	if err != nil {

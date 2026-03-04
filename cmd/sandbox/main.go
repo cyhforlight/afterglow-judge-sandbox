@@ -1,3 +1,4 @@
+// Package main provides the entry point for the afterglow-judge-sandbox CLI.
 package main
 
 import (

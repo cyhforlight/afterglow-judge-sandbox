@@ -1,3 +1,4 @@
+// Package service implements the core execution logic using containerd.
 package service
 
 import (
@@ -69,6 +70,7 @@ type RunProfile struct {
 	BuildArgs   func(containerPath string) []string // build the process argv
 }
 
+// NativeRunProfile returns the profile for C/C++ executables.
 func NativeRunProfile() RunProfile {
 	return RunProfile{
 		ImageRef:    "gcr.io/distroless/cc-debian12:latest",
@@ -78,6 +80,7 @@ func NativeRunProfile() RunProfile {
 	}
 }
 
+// PythonRunProfile returns the profile for Python scripts.
 func PythonRunProfile() RunProfile {
 	return RunProfile{
 		ImageRef:    "gcr.io/distroless/python3-debian12:latest",
@@ -87,6 +90,7 @@ func PythonRunProfile() RunProfile {
 	}
 }
 
+// JavaRunProfile returns the profile for Java JAR files.
 func JavaRunProfile() RunProfile {
 	return RunProfile{
 		ImageRef:    "gcr.io/distroless/java21-debian12:latest",
@@ -106,6 +110,7 @@ func defaultRunProfiles() map[model.Language]RunProfile {
 	}
 }
 
+// ContainerdRunner executes code in isolated containers using containerd.
 type ContainerdRunner struct {
 	socketPath string
 	namespace  string
@@ -116,16 +121,19 @@ type ContainerdRunner struct {
 	checkContainerd func(ctx context.Context, socketPath string) error
 }
 
+// NewContainerdRunner creates a runner with default language profiles.
 func NewContainerdRunner(socketPath string) *ContainerdRunner {
 	return NewContainerdRunnerWithProfiles(socketPath, defaultRunProfiles())
 }
 
+// NewContainerdRunnerWithProfiles creates a runner with custom language profiles.
 func NewContainerdRunnerWithProfiles(socketPath string, profiles map[model.Language]RunProfile) *ContainerdRunner {
 	if socketPath == "" {
 		socketPath = defaultSocketPath
 	}
 
 	clonedProfiles := make(map[model.Language]RunProfile, len(profiles))
+	//nolint:modernize // explicit loop is clearer than maps.Copy for small maps
 	for language, profile := range profiles {
 		clonedProfiles[language] = profile
 	}
@@ -167,6 +175,7 @@ func ensureContainerdAvailable(ctx context.Context, socketPath string) error {
 	return nil
 }
 
+// PreflightCheck verifies that cgroup v2 and containerd are available.
 func (r *ContainerdRunner) PreflightCheck(ctx context.Context) error {
 	if err := r.checkCgroupV2(); err != nil {
 		return err
@@ -186,6 +195,7 @@ func (r *ContainerdRunner) profileForLanguage(language model.Language) (RunProfi
 	return RunProfile{}, fmt.Errorf("no run profile registered for language %q", language)
 }
 
+// Execute runs the given request and returns the execution result.
 func (r *ContainerdRunner) Execute(ctx context.Context, req model.ExecuteRequest) model.ExecuteResult {
 	result, err := r.execute(ctx, req)
 	if err != nil {
@@ -271,6 +281,8 @@ func (r *ContainerdRunner) prepareExecutionPlan(req model.ExecuteRequest) (execu
 // On success it returns a runningExecution and a cleanup function that the
 // caller must defer. On failure the defer inside this function automatically
 // releases every resource acquired so far (cleanup-stack pattern).
+//
+//nolint:funlen // Setup requires sequential resource allocation
 func (r *ContainerdRunner) setupExecution(
 	ctx context.Context,
 	req model.ExecuteRequest,
@@ -337,7 +349,7 @@ func (r *ContainerdRunner) setupExecution(
 				Source:      tmpDir,
 				Options:     []string{"rbind", "ro"},
 			}}),
-			oci.WithMemoryLimit(uint64(plan.limits.memoryLimitBytes)),
+			oci.WithMemoryLimit(uint64(plan.limits.memoryLimitBytes)), //nolint:gosec // G115: value is validated and positive
 			oci.WithMemorySwap(plan.limits.memoryLimitBytes),
 			sandboxSecurityOpts(),
 		),
@@ -443,7 +455,7 @@ func (r *ContainerdRunner) watchExecution(run runningExecution) (model.ExecuteRe
 // 64 bits of randomness from math/rand/v2 (auto-seeded from crypto/rand
 // in Go 1.22+), avoiding the wall-clock collisions of UnixNano().
 func generateContainerID() string {
-	return fmt.Sprintf("sandbox-%016x", rand.Uint64())
+	return fmt.Sprintf("sandbox-%016x", rand.Uint64()) //nolint:gosec // G404: math/rand/v2 is cryptographically seeded
 }
 
 // pickCPU randomly selects a CPU core for the container. Each sandbox
@@ -454,7 +466,7 @@ func pickCPU() string {
 	if cpuCount <= 1 {
 		return "0"
 	}
-	return strconv.Itoa(rand.IntN(cpuCount))
+	return strconv.Itoa(rand.IntN(cpuCount)) //nolint:gosec // G404: math/rand/v2 is cryptographically seeded
 }
 
 // sandboxSecurityOpts hardens the container for running untrusted code.
@@ -531,11 +543,11 @@ type cgroupMetrics struct {
 }
 
 func (m cgroupMetrics) cpuMillis() int {
-	return int(m.cpuNanos / nanosPerMs)
+	return int(m.cpuNanos / nanosPerMs) //nolint:gosec // G115: value range is validated by cgroup limits
 }
 
 func (m cgroupMetrics) peakMemMB() int {
-	return int(m.peakMemBytes / uint64(bytesPerMiB))
+	return int(m.peakMemBytes / uint64(bytesPerMiB)) //nolint:gosec // G115: value range is validated by cgroup limits
 }
 
 func collectMetrics(ctx context.Context, task containerd.Task) cgroupMetrics {
@@ -777,7 +789,7 @@ func buildVerdict(
 }
 
 func openInputFile(path string) (*os.File, error) {
-	inputFile, err := os.Open(path)
+	inputFile, err := os.Open(path) //nolint:gosec // G304: path is from validated user input
 	if err != nil {
 		return nil, fmt.Errorf("open input file: %w", err)
 	}
@@ -799,13 +811,13 @@ func openInputFile(path string) (*os.File, error) {
 }
 
 func copyFile(src, dst string, perm os.FileMode) error {
-	in, err := os.Open(src)
+	in, err := os.Open(src) //nolint:gosec // G304: paths are from validated configuration
 	if err != nil {
 		return fmt.Errorf("open source file %q: %w", src, err)
 	}
 	defer func() { _ = in.Close() }()
 
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm) //nolint:gosec // G304: paths are from validated configuration
 	if err != nil {
 		return fmt.Errorf("open destination file %q: %w", dst, err)
 	}

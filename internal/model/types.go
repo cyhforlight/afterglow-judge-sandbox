@@ -1,3 +1,4 @@
+// Package model defines core domain types for the sandbox system.
 package model
 
 import (
@@ -6,8 +7,10 @@ import (
 	"strings"
 )
 
+// Language represents a supported programming language.
 type Language int
 
+// Supported programming languages.
 const (
 	LanguageUnknown Language = iota
 	LanguageC
@@ -16,6 +19,7 @@ const (
 	LanguagePython
 )
 
+// ParseLanguage converts a string to a Language constant.
 func ParseLanguage(raw string) (Language, error) {
 	switch strings.ToUpper(strings.TrimSpace(raw)) {
 	case "C":
@@ -46,12 +50,15 @@ func (l Language) String() string {
 	}
 }
 
+// MarshalJSON implements json.Marshaler for Language.
 func (l Language) MarshalJSON() ([]byte, error) {
 	return json.Marshal(l.String())
 }
 
+// Verdict represents the execution result status.
 type Verdict int
 
+// Execution verdicts.
 const (
 	VerdictUnknown Verdict = iota
 	VerdictOK
@@ -81,10 +88,12 @@ func (v Verdict) String() string {
 	}
 }
 
+// MarshalJSON implements json.Marshaler for Verdict.
 func (v Verdict) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.String())
 }
 
+// ExecuteRequest contains parameters for code execution.
 type ExecuteRequest struct {
 	ExecutablePath string   `json:"executablePath"`
 	InputPath      string   `json:"inputPath"`
@@ -93,6 +102,7 @@ type ExecuteRequest struct {
 	MemoryLimit    int      `json:"memoryLimit"` // megabytes
 }
 
+// ExecuteResult contains the execution outcome and resource usage.
 type ExecuteResult struct {
 	Verdict    Verdict `json:"verdict"`
 	Stdout     string  `json:"stdout"`
