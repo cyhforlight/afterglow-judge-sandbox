@@ -71,9 +71,10 @@ type RunProfile struct {
 }
 
 // NativeRunProfile returns the profile for C/C++ executables.
+// Expects fully static binaries (compiled with -static).
 func NativeRunProfile() RunProfile {
 	return RunProfile{
-		ImageRef:    "gcr.io/distroless/cc-debian12:latest",
+		ImageRef:    "gcr.io/distroless/static-debian12:latest",
 		SandboxFile: "program",
 		FileMode:    0755,
 		BuildArgs:   func(p string) []string { return []string{p} },

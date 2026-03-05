@@ -18,7 +18,7 @@
 ### 2. 架构简洁
 
 - 清晰的模块划分（cmd/internal 标准布局）
-- 依赖方向单向（app → service → model）
+- 依赖方向单向（transport → service → model）
 - 接口抽象适度（便于测试，但不过度设计）
 
 ### 3. 主流最佳实践
@@ -49,30 +49,32 @@
 
 ### 日志规范
 
-**内部业务逻辑**使用 `log/slog` 进行结构化日志记录：
+**所有内部代码**使用 `log/slog` 进行结构化日志记录：
 
 ```go
-// ✅ 推荐（service/internal 层）
+// ✅ 推荐（所有内部层）
 slog.InfoContext(ctx, "execution complete",
     "verdict", result.Verdict.String(),
     "timeUsed", result.TimeUsed,
 )
 
-// ❌ 避免（service/internal 层）
+// ❌ 避免（所有内部层）
 fmt.Fprintf(os.Stderr, "execution complete: %v\n", result)
 ```
 
-**CLI 应用层**可以使用 stdout/stderr 输出用户可见消息：
+**HTTP 响应**使用 JSON 格式：
 
 ```go
-// ✅ 可接受（app/cmd 层的用户输出）
-fmt.Fprintf(errOut, "invalid arguments: %v\n", err)
-fmt.Fprintln(out, jsonResult)
+// ✅ 推荐（HTTP 传输层）
+json.NewEncoder(w).Encode(response)
+
+// ❌ 避免（HTTP 传输层）
+fmt.Fprintf(w, "result: %v\n", result)
 ```
 
 **原则**：
-- Service/internal 层：使用 slog（机器可读、结构化）
-- App/cmd 层：可使用 fmt 输出（人类可读、用户友好）
+- 所有内部代码：使用 slog（机器可读、结构化）
+- HTTP 响应：使用 JSON 格式（标准 API 响应）
 
 ### 现代 Go 特性
 

@@ -1,12 +1,45 @@
-# build output
-/sandbox
+# Build output
+/server
 
-# compiled C/C++ binaries (no extension, alongside .cpp sources)
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+
+# Output of go build
+/bin/
+/dist/
+
+# Compiled C/C++ binaries (no extension, alongside .cpp sources)
 testprograms/cpp/ok
 testprograms/cpp/tle
 testprograms/cpp/mle
 testprograms/cpp/ole
 testprograms/cpp/re
 
-# compiled Java JARs
+# Compiled Java JARs
 testprograms/java/*.jar
+
+# Go workspace file
+go.work
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.log
+/tmp/

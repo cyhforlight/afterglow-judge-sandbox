@@ -1,0 +1,176 @@
+package storage
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// LocalStorage implements Storage using the local filesystem.
+type LocalStorage struct {
+	baseDir string
+}
+
+// NewLocalStorage creates a LocalStorage instance.
+// If baseDir is empty, uses os.TempDir().
+func NewLocalStorage(baseDir string) (*LocalStorage, error) {
+	if baseDir == "" {
+		baseDir = os.TempDir()
+	}
+
+	// Ensure base directory exists
+	if err := os.MkdirAll(baseDir, 0o755); err != nil {
+		return nil, fmt.Errorf("failed to create base directory: %w", err)
+	}
+
+	return &LocalStorage{baseDir: baseDir}, nil
+}
+
+// Store saves content to a temporary file and returns its key.
+func (s *LocalStorage) Store(_ context.Context, name string, content io.Reader) (string, error) {
+	// Generate unique key
+	key, err := generateKey()
+	if err != nil {
+		return "", fmt.Errorf("failed to generate key: %w", err)
+	}
+
+	// Sanitize filename
+	safeName := sanitizeFilename(name)
+	if safeName == "" {
+		safeName = "file"
+	}
+
+	// Create file path: baseDir/key_safeName
+	filePath := filepath.Join(s.baseDir, fmt.Sprintf("%s_%s", key, safeName))
+
+	// Create file
+	file, err := os.Create(filePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to create file: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+
+	// Copy content
+	if _, err := io.Copy(file, content); err != nil {
+		_ = os.Remove(filePath)
+		return "", fmt.Errorf("failed to write content: %w", err)
+	}
+
+	return key, nil
+}
+
+// Get retrieves a file by key and returns its path with a cleanup function.
+func (s *LocalStorage) Get(_ context.Context, key string) (string, func(), error) {
+	// Validate key format
+	if err := validateKey(key); err != nil {
+		return "", nil, err
+	}
+
+	// Find file with this key prefix
+	pattern := filepath.Join(s.baseDir, key+"_*")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to search for file: %w", err)
+	}
+
+	if len(matches) == 0 {
+		return "", nil, fmt.Errorf("file not found: %s", key)
+	}
+
+	filePath := matches[0]
+
+	// Verify file exists and is readable
+	if _, err := os.Stat(filePath); err != nil {
+		return "", nil, fmt.Errorf("file not accessible: %w", err)
+	}
+
+	// Cleanup function deletes the file
+	cleanup := func() {
+		_ = os.Remove(filePath)
+	}
+
+	return filePath, cleanup, nil
+}
+
+// Delete removes a file by key.
+func (s *LocalStorage) Delete(_ context.Context, key string) error {
+	if err := validateKey(key); err != nil {
+		return err
+	}
+
+	pattern := filepath.Join(s.baseDir, key+"_*")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return fmt.Errorf("failed to search for file: %w", err)
+	}
+
+	if len(matches) == 0 {
+		return fmt.Errorf("file not found: %s", key)
+	}
+
+	for _, path := range matches {
+		if err := os.Remove(path); err != nil {
+			return fmt.Errorf("failed to delete file: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// generateKey creates a random hex key.
+func generateKey() (string, error) {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
+}
+
+// sanitizeFilename removes dangerous characters from filenames.
+func sanitizeFilename(name string) string {
+	// Remove path separators and dangerous characters
+	name = filepath.Base(name)
+	name = strings.ReplaceAll(name, "..", "")
+	name = strings.TrimSpace(name)
+
+	// Only allow alphanumeric, dash, underscore, and dot
+	var safe strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
+			safe.WriteRune(r)
+		}
+	}
+
+	result := safe.String()
+	if len(result) > 255 {
+		result = result[:255]
+	}
+
+	return result
+}
+
+// validateKey checks if a key has valid format.
+func validateKey(key string) error {
+	if key == "" {
+		return errors.New("key cannot be empty")
+	}
+
+	// Key should be hex string
+	if _, err := hex.DecodeString(key); err != nil {
+		return fmt.Errorf("invalid key format: %w", err)
+	}
+
+	// Check for path traversal
+	if strings.Contains(key, "..") || strings.Contains(key, "/") || strings.Contains(key, "\\") {
+		return errors.New("key contains invalid characters")
+	}
+
+	return nil
+}
