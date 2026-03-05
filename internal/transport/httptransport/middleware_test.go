@@ -12,6 +12,8 @@ import (
 )
 
 // TestLoggingMiddleware tests the logging middleware.
+//
+//nolint:funlen // Comprehensive matrix for middleware behavior.
 func TestLoggingMiddleware(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -283,6 +285,8 @@ func TestTimeoutMiddleware_ContextPropagation(t *testing.T) {
 }
 
 // TestAuthMiddleware tests the authentication middleware.
+//
+//nolint:funlen // Comprehensive matrix for middleware behavior.
 func TestAuthMiddleware(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -369,6 +373,8 @@ func TestAuthMiddleware(t *testing.T) {
 }
 
 // TestCORSMiddleware tests the CORS middleware.
+//
+//nolint:funlen // Comprehensive matrix for middleware behavior.
 func TestCORSMiddleware(t *testing.T) {
 	tests := []struct {
 		name           string

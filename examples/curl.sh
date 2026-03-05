@@ -1,36 +1,24 @@
 #!/bin/bash
-# Example: Execute a simple C++ program via HTTP API
+set -euo pipefail
 
-# Compile a simple program
-cat > /tmp/hello.cpp << 'EOF'
-#include <iostream>
-int main() {
-    int n;
-    std::cin >> n;
-    std::cout << n * 2 << std::endl;
-    return 0;
-}
-EOF
+# Example: Submit source code + testcases to judge API
 
-g++ -o /tmp/hello /tmp/hello.cpp
+SOURCE_CODE=$(cat <<'PY'
+import sys
+n = int(sys.stdin.readline())
+print(n * 2)
+PY
+)
 
-# Create input
-echo "21" > /tmp/input.txt
-
-# Encode files to base64
-EXECUTABLE_BASE64=$(base64 -w 0 /tmp/hello)
-INPUT_BASE64=$(base64 -w 0 /tmp/input.txt)
-
-# Send request to server
 curl -X POST http://localhost:8080/v1/execute \
   -H "Content-Type: application/json" \
   -d "{
-    \"executableBase64\": \"$EXECUTABLE_BASE64\",
-    \"inputBase64\": \"$INPUT_BASE64\",
-    \"language\": \"C++\",
+    \"sourceCode\": $(jq -Rs . <<<"$SOURCE_CODE"),
+    \"language\": \"Python\",
     \"timeLimit\": 1000,
-    \"memoryLimit\": 256
+    \"memoryLimit\": 256,
+    \"testcases\": [
+      {\"name\": \"case-1\", \"inputText\": \"21\\n\", \"expectedOutputText\": \"42\\n\"},
+      {\"name\": \"case-2\", \"inputText\": \"7\\n\", \"expectedOutputText\": \"14\\n\"}
+    ]
   }" | jq .
-
-# Cleanup
-rm -f /tmp/hello /tmp/hello.cpp /tmp/input.txt

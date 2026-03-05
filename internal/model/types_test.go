@@ -18,6 +18,8 @@ func TestVerdictString(t *testing.T) {
 		{VerdictMLE, "MemoryLimitExceeded"},
 		{VerdictOLE, "OutputLimitExceeded"},
 		{VerdictRE, "RuntimeError"},
+		{VerdictWA, "WrongAnswer"},
+		{VerdictCE, "CompileError"},
 		{VerdictUKE, "UnknownError"},
 	}
 	for _, tt := range tests {

@@ -66,6 +66,8 @@ const (
 	VerdictMLE
 	VerdictOLE
 	VerdictRE
+	VerdictWA
+	VerdictCE
 	VerdictUKE
 )
 
@@ -81,6 +83,10 @@ func (v Verdict) String() string {
 		return "OutputLimitExceeded"
 	case VerdictRE:
 		return "RuntimeError"
+	case VerdictWA:
+		return "WrongAnswer"
+	case VerdictCE:
+		return "CompileError"
 	case VerdictUKE:
 		return "UnknownError"
 	default:
@@ -110,4 +116,46 @@ type ExecuteResult struct {
 	MemoryUsed int     `json:"memoryUsed"` // megabytes
 	ExitCode   int     `json:"exitCode"`
 	ExtraInfo  string  `json:"extraInfo"`
+}
+
+// JudgeTestCase represents a single test case for judging.
+type JudgeTestCase struct {
+	Name           string `json:"name"`
+	InputText      string `json:"inputText"`
+	ExpectedOutput string `json:"expectedOutputText"`
+}
+
+// JudgeRequest contains parameters for a full judge session.
+type JudgeRequest struct {
+	SourceCode  string          `json:"sourceCode"`
+	Language    Language        `json:"language"`
+	TimeLimit   int             `json:"timeLimit"`   // milliseconds, per test case
+	MemoryLimit int             `json:"memoryLimit"` // megabytes, per test case
+	TestCases   []JudgeTestCase `json:"testcases"`
+}
+
+// CompileResult contains compile phase details.
+type CompileResult struct {
+	Succeeded bool   `json:"succeeded"`
+	Log       string `json:"log"`
+}
+
+// JudgeCaseResult contains one test case execution result.
+type JudgeCaseResult struct {
+	Name       string  `json:"name"`
+	Verdict    Verdict `json:"verdict"`
+	Stdout     string  `json:"stdout"`
+	TimeUsed   int     `json:"timeUsed"`   // milliseconds
+	MemoryUsed int     `json:"memoryUsed"` // megabytes
+	ExitCode   int     `json:"exitCode"`
+	ExtraInfo  string  `json:"extraInfo"`
+}
+
+// JudgeResult contains the final judge outcome.
+type JudgeResult struct {
+	Verdict     Verdict           `json:"verdict"`
+	Compile     CompileResult     `json:"compile"`
+	Cases       []JudgeCaseResult `json:"cases"`
+	PassedCount int               `json:"passedCount"`
+	TotalCount  int               `json:"totalCount"`
 }

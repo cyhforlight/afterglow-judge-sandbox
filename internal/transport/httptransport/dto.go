@@ -2,30 +2,53 @@
 package httptransport
 
 import (
-	"encoding/base64"
 	"errors"
 	"fmt"
+	"strings"
 
 	"afterglow-judge-sandbox/internal/model"
 )
 
-// ExecuteRequestDTO represents an HTTP execution request.
-type ExecuteRequestDTO struct {
-	ExecutableBase64 string `json:"executableBase64"`
-	InputBase64      string `json:"inputBase64"`
-	Language         string `json:"language"`
-	TimeLimit        int    `json:"timeLimit"`   // milliseconds
-	MemoryLimit      int    `json:"memoryLimit"` // megabytes
+// JudgeTestCaseDTO represents one testcase in HTTP request.
+type JudgeTestCaseDTO struct {
+	Name               string `json:"name"`
+	InputText          string `json:"inputText"`
+	ExpectedOutputText string `json:"expectedOutputText"`
 }
 
-// ExecuteResponseDTO represents an HTTP execution response.
-type ExecuteResponseDTO struct {
+// JudgeRequestDTO represents an HTTP judge request.
+type JudgeRequestDTO struct {
+	SourceCode  string             `json:"sourceCode"`
+	Language    string             `json:"language"`
+	TimeLimit   int                `json:"timeLimit"`   // milliseconds
+	MemoryLimit int                `json:"memoryLimit"` // megabytes
+	TestCases   []JudgeTestCaseDTO `json:"testcases"`
+}
+
+// CompileResultDTO represents compile details.
+type CompileResultDTO struct {
+	Succeeded bool   `json:"succeeded"`
+	Log       string `json:"log"`
+}
+
+// JudgeCaseResultDTO represents one testcase result.
+type JudgeCaseResultDTO struct {
+	Name       string `json:"name"`
 	Verdict    string `json:"verdict"`
 	Stdout     string `json:"stdout"`
 	TimeUsed   int    `json:"timeUsed"`   // milliseconds
 	MemoryUsed int    `json:"memoryUsed"` // megabytes
 	ExitCode   int    `json:"exitCode"`
 	ExtraInfo  string `json:"extraInfo"`
+}
+
+// JudgeResponseDTO represents an HTTP judge response.
+type JudgeResponseDTO struct {
+	Verdict     string               `json:"verdict"`
+	Compile     CompileResultDTO     `json:"compile"`
+	Cases       []JudgeCaseResultDTO `json:"cases"`
+	PassedCount int                  `json:"passedCount"`
+	TotalCount  int                  `json:"totalCount"`
 }
 
 // ErrorResponseDTO represents an HTTP error response.
@@ -35,30 +58,12 @@ type ErrorResponseDTO struct {
 	Details string `json:"details,omitempty"`
 }
 
-// DecodeExecutable decodes the base64 executable content.
-func (dto *ExecuteRequestDTO) DecodeExecutable() ([]byte, error) {
-	data, err := base64.StdEncoding.DecodeString(dto.ExecutableBase64)
-	if err != nil {
-		return nil, fmt.Errorf("invalid executable base64: %w", err)
+// Validate checks whether request is valid.
+func (dto *JudgeRequestDTO) Validate() error {
+	if strings.TrimSpace(dto.SourceCode) == "" {
+		return errors.New("sourceCode is required")
 	}
-	return data, nil
-}
-
-// DecodeInput decodes the base64 input content.
-func (dto *ExecuteRequestDTO) DecodeInput() ([]byte, error) {
-	data, err := base64.StdEncoding.DecodeString(dto.InputBase64)
-	if err != nil {
-		return nil, fmt.Errorf("invalid input base64: %w", err)
-	}
-	return data, nil
-}
-
-// Validate checks if the request is valid.
-func (dto *ExecuteRequestDTO) Validate() error {
-	if dto.ExecutableBase64 == "" {
-		return errors.New("executableBase64 is required")
-	}
-	if dto.Language == "" {
+	if strings.TrimSpace(dto.Language) == "" {
 		return errors.New("language is required")
 	}
 	if dto.TimeLimit <= 0 {
@@ -67,17 +72,74 @@ func (dto *ExecuteRequestDTO) Validate() error {
 	if dto.MemoryLimit <= 0 {
 		return errors.New("memoryLimit must be positive")
 	}
+	if len(dto.TestCases) == 0 {
+		return errors.New("testcases must not be empty")
+	}
+
+	for i, tc := range dto.TestCases {
+		if strings.TrimSpace(tc.Name) == "" {
+			continue
+		}
+		if strings.ContainsRune(tc.Name, '\n') {
+			return fmt.Errorf("testcases[%d].name must be single-line", i)
+		}
+	}
+
 	return nil
 }
 
-// ToExecuteResult converts a model.ExecuteResult to DTO.
-func ToExecuteResult(result model.ExecuteResult) ExecuteResponseDTO {
-	return ExecuteResponseDTO{
-		Verdict:    result.Verdict.String(),
-		Stdout:     result.Stdout,
-		TimeUsed:   result.TimeUsed,
-		MemoryUsed: result.MemoryUsed,
-		ExitCode:   result.ExitCode,
-		ExtraInfo:  result.ExtraInfo,
+// ToModel converts HTTP DTO into model request.
+func (dto *JudgeRequestDTO) ToModel() (model.JudgeRequest, error) {
+	language, err := model.ParseLanguage(dto.Language)
+	if err != nil {
+		return model.JudgeRequest{}, err
+	}
+
+	testCases := make([]model.JudgeTestCase, 0, len(dto.TestCases))
+	for idx, testCase := range dto.TestCases {
+		name := strings.TrimSpace(testCase.Name)
+		if name == "" {
+			name = fmt.Sprintf("case-%d", idx+1)
+		}
+		testCases = append(testCases, model.JudgeTestCase{
+			Name:           name,
+			InputText:      testCase.InputText,
+			ExpectedOutput: testCase.ExpectedOutputText,
+		})
+	}
+
+	return model.JudgeRequest{
+		SourceCode:  dto.SourceCode,
+		Language:    language,
+		TimeLimit:   dto.TimeLimit,
+		MemoryLimit: dto.MemoryLimit,
+		TestCases:   testCases,
+	}, nil
+}
+
+// ToJudgeResponse converts model result into response DTO.
+func ToJudgeResponse(result model.JudgeResult) JudgeResponseDTO {
+	cases := make([]JudgeCaseResultDTO, 0, len(result.Cases))
+	for _, caseResult := range result.Cases {
+		cases = append(cases, JudgeCaseResultDTO{
+			Name:       caseResult.Name,
+			Verdict:    caseResult.Verdict.String(),
+			Stdout:     caseResult.Stdout,
+			TimeUsed:   caseResult.TimeUsed,
+			MemoryUsed: caseResult.MemoryUsed,
+			ExitCode:   caseResult.ExitCode,
+			ExtraInfo:  caseResult.ExtraInfo,
+		})
+	}
+
+	return JudgeResponseDTO{
+		Verdict: result.Verdict.String(),
+		Compile: CompileResultDTO{
+			Succeeded: result.Compile.Succeeded,
+			Log:       result.Compile.Log,
+		},
+		Cases:       cases,
+		PassedCount: result.PassedCount,
+		TotalCount:  result.TotalCount,
 	}
 }

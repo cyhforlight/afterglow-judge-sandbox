@@ -3,100 +3,64 @@ package httptransport
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"afterglow-judge-sandbox/internal/service"
-	"afterglow-judge-sandbox/internal/storage"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-// compileCppStatic compiles C++ code to a fully static binary.
-// Uses -static for complete static linking (no dynamic dependencies).
-func compileCppStatic(t *testing.T, code string) []byte {
+func requireE2EPrerequisites(t *testing.T) {
 	t.Helper()
-
-	// Check if g++ is available
-	if _, err := exec.LookPath("g++"); err != nil {
-		t.Skip("g++ not available, skipping C++ test")
-	}
-
-	// Create temp directory for compilation
-	tmpDir := t.TempDir()
-	srcFile := filepath.Join(tmpDir, "program.cpp")
-	binFile := filepath.Join(tmpDir, "program")
-
-	// Write source code
-	err := os.WriteFile(srcFile, []byte(code), 0644)
-	require.NoError(t, err)
-
-	// Compile with full static linking
-	// -static: fully static binary (no dynamic dependencies)
-	// -O2: optimization level 2
-	cmd := exec.Command("g++",
-		"-o", binFile,
-		"-static",
-		"-O2",
-		srcFile,
-	)
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("Failed to compile C++ code: %v\nStderr: %s", err, stderr.String())
-	}
-
-	// Read compiled binary
-	binary, err := os.ReadFile(binFile)
-	require.NoError(t, err)
-
-	return binary
-}
-
-// TestE2E_HTTP_CPP_OK tests C++ program execution via HTTP.
-func TestE2E_HTTP_CPP_OK(t *testing.T) {
 	if os.Getuid() != 0 {
 		t.Skip("E2E tests require root privileges")
 	}
+}
+
+func newE2EHandler(t *testing.T) *Handler {
+	t.Helper()
+
+	runner := service.NewContainerdRunner("/run/containerd/containerd.sock")
+	compiler := service.NewHostCompiler()
+	judge := service.NewJudgeEngine(runner, compiler)
 
 	ctx := context.Background()
-	runner := service.NewContainerdRunner("/run/containerd/containerd.sock")
-
-	if err := runner.PreflightCheck(ctx); err != nil {
+	if err := judge.PreflightCheck(ctx); err != nil {
 		t.Skipf("Containerd not available: %v", err)
 	}
 
-	stor, err := storage.NewLocalStorage("")
-	require.NoError(t, err)
+	return NewHandler(judge, slog.Default(), 256)
+}
 
-	handler := NewHandler(runner, stor, slog.Default(), 256)
+func decodeJudgeResponse(body *bytes.Buffer) (JudgeResponseDTO, error) {
+	var resp JudgeResponseDTO
+	err := json.NewDecoder(body).Decode(&resp)
+	return resp, err
+}
 
-	// Compile C++ code to static binary
-	cppCode := `#include <iostream>
-int main() {
-    std::cout << "Hello, World!" << std::endl;
-    return 0;
-}`
+func TestE2E_HTTP_Python_OK(t *testing.T) {
+	requireE2EPrerequisites(t)
+	handler := newE2EHandler(t)
 
-	executable := compileCppStatic(t, cppCode)
-
-	reqBody := ExecuteRequestDTO{
-		ExecutableBase64: base64.StdEncoding.EncodeToString(executable),
-		InputBase64:      base64.StdEncoding.EncodeToString([]byte("")),
-		Language:         "C++",
-		TimeLimit:        5000,
-		MemoryLimit:      256,
+	reqBody := JudgeRequestDTO{
+		SourceCode: `import sys
+n = int(sys.stdin.readline())
+print(n * 2)`,
+		Language:    "Python",
+		TimeLimit:   2000,
+		MemoryLimit: 256,
+		TestCases: []JudgeTestCaseDTO{
+			{Name: "case-1", InputText: "21\n", ExpectedOutputText: "42\n"},
+			{Name: "case-2", InputText: "7\n", ExpectedOutputText: "14\n"},
+		},
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -105,52 +69,28 @@ int main() {
 	req := httptest.NewRequest(http.MethodPost, "/v1/execute", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-
 	handler.HandleExecute(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-
-	var resp ExecuteResponseDTO
-	err = json.NewDecoder(w.Body).Decode(&resp)
+	resp, err := decodeJudgeResponse(w.Body)
 	require.NoError(t, err)
 
 	assert.Equal(t, "OK", resp.Verdict)
-	assert.Contains(t, resp.Stdout, "Hello, World!")
-	assert.Equal(t, 0, resp.ExitCode)
+	assert.True(t, resp.Compile.Succeeded)
+	assert.Equal(t, 2, resp.PassedCount)
+	assert.Equal(t, 2, resp.TotalCount)
 }
 
-// TestE2E_HTTP_CPP_TLE tests time limit exceeded via HTTP.
-func TestE2E_HTTP_CPP_TLE(t *testing.T) {
-	if os.Getuid() != 0 {
-		t.Skip("E2E tests require root privileges")
-	}
+func TestE2E_HTTP_Python_WA(t *testing.T) {
+	requireE2EPrerequisites(t)
+	handler := newE2EHandler(t)
 
-	ctx := context.Background()
-	runner := service.NewContainerdRunner("/run/containerd/containerd.sock")
-
-	if err := runner.PreflightCheck(ctx); err != nil {
-		t.Skipf("Containerd not available: %v", err)
-	}
-
-	stor, err := storage.NewLocalStorage("")
-	require.NoError(t, err)
-
-	handler := NewHandler(runner, stor, slog.Default(), 256)
-
-	cppCode := `#include <iostream>
-int main() {
-    while(true) {}
-    return 0;
-}`
-
-	executable := compileCppStatic(t, cppCode)
-
-	reqBody := ExecuteRequestDTO{
-		ExecutableBase64: base64.StdEncoding.EncodeToString(executable),
-		InputBase64:      base64.StdEncoding.EncodeToString([]byte("")),
-		Language:         "C++",
-		TimeLimit:        1000,
-		MemoryLimit:      256,
+	reqBody := JudgeRequestDTO{
+		SourceCode:  `print("41")`,
+		Language:    "Python",
+		TimeLimit:   2000,
+		MemoryLimit: 256,
+		TestCases:   []JudgeTestCaseDTO{{Name: "case-1", InputText: "", ExpectedOutputText: "42\n"}},
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -159,113 +99,77 @@ int main() {
 	req := httptest.NewRequest(http.MethodPost, "/v1/execute", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-
 	handler.HandleExecute(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-
-	var resp ExecuteResponseDTO
-	err = json.NewDecoder(w.Body).Decode(&resp)
+	resp, err := decodeJudgeResponse(w.Body)
 	require.NoError(t, err)
 
+	assert.Equal(t, "WrongAnswer", resp.Verdict)
+	require.Len(t, resp.Cases, 1)
+	assert.Equal(t, "WrongAnswer", resp.Cases[0].Verdict)
+}
+
+func TestE2E_HTTP_CPP_TLE(t *testing.T) {
+	requireE2EPrerequisites(t)
+	if _, err := exec.LookPath("g++"); err != nil {
+		t.Skip("g++ not available")
+	}
+
+	handler := newE2EHandler(t)
+
+	reqBody := JudgeRequestDTO{
+		SourceCode: `int main() {
+  while (true) {}
+  return 0;
+}`,
+		Language:    "C++",
+		TimeLimit:   1000,
+		MemoryLimit: 256,
+		TestCases:   []JudgeTestCaseDTO{{Name: "case-1", InputText: "", ExpectedOutputText: ""}},
+	}
+
+	body, err := json.Marshal(reqBody)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/execute", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.HandleExecute(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	resp, err := decodeJudgeResponse(w.Body)
+	require.NoError(t, err)
 	assert.Equal(t, "TimeLimitExceeded", resp.Verdict)
 }
 
-// TestE2E_HTTP_Python_OK tests Python program execution via HTTP.
-func TestE2E_HTTP_Python_OK(t *testing.T) {
-	if os.Getuid() != 0 {
-		t.Skip("E2E tests require root privileges")
-	}
-
-	ctx := context.Background()
-	runner := service.NewContainerdRunner("/run/containerd/containerd.sock")
-
-	if err := runner.PreflightCheck(ctx); err != nil {
-		t.Skipf("Containerd not available: %v", err)
-	}
-
-	stor, err := storage.NewLocalStorage("")
-	require.NoError(t, err)
-
-	handler := NewHandler(runner, stor, slog.Default(), 256)
-
-	pythonCode := `print("Hello from Python!")`
-
-	reqBody := ExecuteRequestDTO{
-		ExecutableBase64: base64.StdEncoding.EncodeToString([]byte(pythonCode)),
-		InputBase64:      base64.StdEncoding.EncodeToString([]byte("")),
-		Language:         "Python",
-		TimeLimit:        5000,
-		MemoryLimit:      256,
-	}
-
-	body, err := json.Marshal(reqBody)
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/execute", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	handler.HandleExecute(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	var resp ExecuteResponseDTO
-	err = json.NewDecoder(w.Body).Decode(&resp)
-	require.NoError(t, err)
-
-	assert.Equal(t, "OK", resp.Verdict)
-	assert.Contains(t, resp.Stdout, "Hello from Python!")
-}
-
-// TestE2E_HTTP_ConcurrentExecutions tests concurrent HTTP requests.
-func TestE2E_HTTP_ConcurrentExecutions(t *testing.T) {
-	if os.Getuid() != 0 {
-		t.Skip("E2E tests require root privileges")
-	}
-
-	ctx := context.Background()
-	runner := service.NewContainerdRunner("/run/containerd/containerd.sock")
-
-	if err := runner.PreflightCheck(ctx); err != nil {
-		t.Skipf("Containerd not available: %v", err)
-	}
-
-	stor, err := storage.NewLocalStorage("")
-	require.NoError(t, err)
-
-	handler := NewHandler(runner, stor, slog.Default(), 256)
-
-	cppCode := `#include <iostream>
-int main() {
-    std::cout << "OK" << std::endl;
-    return 0;
-}`
-
-	executable := compileCppStatic(t, cppCode)
+func TestE2E_HTTP_ConcurrentJudges(t *testing.T) {
+	requireE2EPrerequisites(t)
+	handler := newE2EHandler(t)
 
 	const numRequests = 3
 	results := make(chan string, numRequests)
 
 	for range numRequests {
 		go func() {
-			reqBody := ExecuteRequestDTO{
-				ExecutableBase64: base64.StdEncoding.EncodeToString(executable),
-				InputBase64:      base64.StdEncoding.EncodeToString([]byte("")),
-				Language:         "C++",
-				TimeLimit:        5000,
-				MemoryLimit:      256,
+			reqBody := JudgeRequestDTO{
+				SourceCode:  `print("OK")`,
+				Language:    "Python",
+				TimeLimit:   2000,
+				MemoryLimit: 256,
+				TestCases:   []JudgeTestCaseDTO{{Name: "case-1", InputText: "", ExpectedOutputText: "OK\n"}},
 			}
-
 			body, _ := json.Marshal(reqBody)
 			req := httptest.NewRequest(http.MethodPost, "/v1/execute", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
-
 			handler.HandleExecute(w, req)
 
-			var resp ExecuteResponseDTO
-			_ = json.NewDecoder(w.Body).Decode(&resp)
+			resp, decodeErr := decodeJudgeResponse(w.Body)
+			if decodeErr != nil {
+				results <- "DECODE_ERROR"
+				return
+			}
 			results <- resp.Verdict
 		}()
 	}

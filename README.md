@@ -1,14 +1,14 @@
 # Afterglow Judge Sandbox
 
-一个安全的、基于容器的代码执行沙箱，支持 C、C++、Java 和 Python。
+一个基于 containerd 的代码评测引擎：接收源代码和多组测试数据，完成编译、隔离执行、输出比对和聚合判定。
 
 ## 特性
 
-- 🔒 **安全隔离**：基于 containerd 的容器隔离
-- ⚡ **高性能**：精确的时间和内存测量
-- 🌐 **HTTP API**：RESTful API 接口
-- 🔌 **可扩展**：清晰的接口设计，易于扩展新语言和传输层
-- 📊 **并发控制**：内置速率限制，防止资源耗尽
+- 安全隔离：基于 containerd 运行用户程序
+- 多语言：C / C++ / Java / Python
+- 多测试点：逐点评测并返回明细
+- 结果聚合：支持 `OK` / `WrongAnswer` / `CompileError` / `TimeLimitExceeded` 等判定
+- HTTP API：统一 Web 服务入口
 
 ## 快速开始
 
@@ -16,92 +16,111 @@
 # 构建
 go build -o server ./cmd/server
 
-# 启动服务器
+# 启动服务
 ./server
 
-# 调用 API
+# 调用评测 API
 curl -X POST http://localhost:8080/v1/execute \
   -H "Content-Type: application/json" \
   -d '{
-    "executableBase64": "...",
-    "inputBase64": "...",
-    "language": "C++",
+    "sourceCode": "import sys\\nn=int(sys.stdin.readline())\\nprint(n*2)",
+    "language": "Python",
     "timeLimit": 1000,
-    "memoryLimit": 256
+    "memoryLimit": 256,
+    "testcases": [
+      {"name": "case-1", "inputText": "21\\n", "expectedOutputText": "42\\n"},
+      {"name": "case-2", "inputText": "7\\n", "expectedOutputText": "14\\n"}
+    ]
   }'
 ```
 
 ## 架构
 
-纯 HTTP API 服务，单体应用架构：
-
 ```
 cmd/
-└── server/           # HTTP 服务器入口（唯一入口）
+└── server/                     # HTTP 服务入口
 
 internal/
-├── model/            # 领域模型（ExecuteRequest, ExecuteResult, Verdict）
-├── service/          # 执行引擎（containerd runner）
-├── transport/        # 传输层
-│   └── httptransport/# HTTP 实现（handler, middleware, server, dto）
-├── storage/          # 文件存储（临时文件管理）
-├── concurrency/      # 并发控制（execution limiter）
-└── config/           # 配置管理（环境变量）
+├── model/                      # 领域模型（JudgeRequest/JudgeResult/Verdict）
+├── service/
+│   ├── compiler.go             # 源码编译（按语言）
+│   ├── judge_service.go        # 编译 + 逐点评测 + 比对 + 聚合
+│   └── containerd_runner.go    # 单次容器执行引擎
+├── transport/httptransport/    # HTTP handler/dto/server
+├── concurrency/                # 并发限制
+└── config/                     # 配置
 ```
-
-**设计原则：**
-- 单体架构：一个可执行文件
-- HTTP API：唯一的对外接口
-- 纯函数调用：内部组件通过接口调用
-- 易于扩展：可轻松添加 gRPC、消息队列等传输层
 
 ## HTTP API
 
-### 执行代码
+### 评测代码
 
-```bash
+```http
 POST /v1/execute
 Content-Type: application/json
-
-{
-  "executableBase64": "<base64编码的可执行文件>",
-  "inputBase64": "<base64编码的输入>",
-  "language": "C++",
-  "timeLimit": 1000,
-  "memoryLimit": 256
-}
 ```
 
-**响应：**
+请求体：
 
 ```json
 {
-  "verdict": "OK",
-  "stdout": "42\n",
-  "timeUsed": 15,
-  "memoryUsed": 4,
-  "exitCode": 0,
-  "extraInfo": ""
+  "sourceCode": "<源代码纯文本>",
+  "language": "C++",
+  "timeLimit": 1000,
+  "memoryLimit": 256,
+  "testcases": [
+    {
+      "name": "case-1",
+      "inputText": "1 2\n",
+      "expectedOutputText": "3\n"
+    }
+  ]
 }
 ```
 
-**Verdict 类型：**
-- `OK` - 正常执行
-- `TimeLimitExceeded` - 超时
-- `MemoryLimitExceeded` - 内存超限
-- `OutputLimitExceeded` - 输出超限
-- `RuntimeError` - 运行时错误
-- `UnknownError` - 未知错误
+响应体：
+
+```json
+{
+  "verdict": "WrongAnswer",
+  "compile": {
+    "succeeded": true,
+    "log": ""
+  },
+  "cases": [
+    {
+      "name": "case-1",
+      "verdict": "WrongAnswer",
+      "stdout": "4\n",
+      "timeUsed": 12,
+      "memoryUsed": 8,
+      "exitCode": 0,
+      "extraInfo": "stdout does not match expected output"
+    }
+  ],
+  "passedCount": 0,
+  "totalCount": 1
+}
+```
+
+### 判定类型
+
+- `OK`
+- `WrongAnswer`
+- `CompileError`
+- `TimeLimitExceeded`
+- `MemoryLimitExceeded`
+- `OutputLimitExceeded`
+- `RuntimeError`
+- `UnknownError`
 
 ### 健康检查
 
-```bash
+```http
 GET /health
 ```
 
 ## 配置
-
-服务器通过环境变量配置：
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
@@ -109,50 +128,27 @@ GET /health
 | `HTTP_PORT` | `8080` | 监听端口 |
 | `HTTP_READ_TIMEOUT` | `30s` | 读取超时 |
 | `HTTP_WRITE_TIMEOUT` | `30s` | 写入超时 |
+| `HTTP_SHUTDOWN_TIMEOUT` | `10s` | 关闭超时 |
 | `CONTAINERD_SOCKET` | `/run/containerd/containerd.sock` | Containerd 套接字 |
-| `MAX_CONCURRENT_EXECUTIONS` | `10` | 最大并发执行数 |
-| `MAX_INPUT_SIZE_MB` | `256` | 最大输入文件大小 |
+| `MAX_CONCURRENT_EXECUTIONS` | `10` | 最大并发评测任务数 |
+| `MAX_INPUT_SIZE_MB` | `256` | 最大请求体限制 |
 | `ENABLE_AUTH` | `false` | 启用 API Key 认证 |
-| `API_KEYS` | - | API Key 列表（逗号分隔）|
+| `API_KEYS` | - | API Key 列表（逗号分隔） |
+| `ALLOWED_ORIGINS` | `*` | CORS 允许来源 |
 | `LOG_LEVEL` | `info` | 日志级别 |
-
-**示例：**
-
-```bash
-export HTTP_PORT=9000
-export MAX_CONCURRENT_EXECUTIONS=20
-export ENABLE_AUTH=true
-export API_KEYS=secret-key-1,secret-key-2
-./server
-```
 
 ## 开发
 
-### 运行测试
-
 ```bash
-go test ./...
-```
+# 单元 + 集成测试
+go test -count=1 ./...
 
-### 代码检查
-
-```bash
+# 代码检查
 golangci-lint run
 ```
 
-### 格式化
+E2E 测试依赖 root + containerd：
 
 ```bash
-go fmt ./...
+sudo -n go test -v ./internal/transport/httptransport -run TestE2E
 ```
-
-## 系统要求
-
-- Go 1.22+
-- containerd（用于本地执行）
-- Linux with cgroup v2
-
-## 许可证
-
-见 LICENSE 文件。
-
