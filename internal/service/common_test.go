@@ -27,9 +27,6 @@ var (
 
 func requireServiceIntegrationTest(t *testing.T) {
 	t.Helper()
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
 }
 
 func projectRoot(t *testing.T) string {

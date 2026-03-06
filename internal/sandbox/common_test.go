@@ -18,10 +18,6 @@ const (
 
 func requireSandboxIntegrationTest(t *testing.T) {
 	t.Helper()
-
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
 }
 
 func newSandboxTestContext(t *testing.T, timeout time.Duration) context.Context {
