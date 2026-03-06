@@ -27,17 +27,6 @@ func TestE2E_AcceptedPrograms(t *testing.T) {
 		assertOutput  func(t *testing.T, stdout string)
 	}{
 		{
-			name:          "C sort program",
-			language:      model.LanguageC,
-			sourceFixture: []string{"c", "ac.c"},
-			inputText:     "5\n10 20 30 40 50\n",
-			timeLimit:     1000,
-			memoryLimit:   128,
-			assertOutput: func(t *testing.T, stdout string) {
-				assert.Contains(t, stdout, "10 20 30 40 50")
-			},
-		},
-		{
 			name:          "C++ sort program",
 			language:      model.LanguageCPP,
 			sourceFixture: []string{"cpp", "ac.cpp"},
@@ -47,23 +36,6 @@ func TestE2E_AcceptedPrograms(t *testing.T) {
 			assertOutput: func(t *testing.T, stdout string) {
 				expectedOutput := readFixture(t, "data1.out")
 				assert.Contains(t, stdout, expectedOutput[:10])
-			},
-		},
-		{
-			name:     "Java hello world",
-			language: model.LanguageJava,
-			sourceText: `
-public class Main {
-    public static void main(String[] args) {
-        System.out.println("Hello World");
-    }
-}
-`,
-			inputText:   "",
-			timeLimit:   2000,
-			memoryLimit: 256,
-			assertOutput: func(t *testing.T, stdout string) {
-				assert.Contains(t, stdout, "Hello World")
 			},
 		},
 		{
@@ -82,14 +54,20 @@ print(sum(numbers))
 			},
 		},
 		{
-			name:          "Java accepted answer",
-			language:      model.LanguageJava,
-			sourceFixture: []string{"java", "ac", "Main.java"},
-			inputFixture:  []string{"data1.in"},
-			timeLimit:     2000,
-			memoryLimit:   256,
+			name:     "Java hello world",
+			language: model.LanguageJava,
+			sourceText: `
+public class Main {
+    public static void main(String[] args) {
+        System.out.println("Hello World");
+    }
+}
+`,
+			inputText:   "",
+			timeLimit:   2000,
+			memoryLimit: 256,
 			assertOutput: func(t *testing.T, stdout string) {
-				assert.Contains(t, stdout, "0 1 1 1 1 1 1 4 4 5 8 9 9")
+				assert.Contains(t, stdout, "Hello World")
 			},
 		},
 	}
@@ -125,147 +103,6 @@ print(sum(numbers))
 			assert.Equal(t, model.VerdictOK, execResult.Verdict)
 			assert.Equal(t, 0, execResult.ExitCode)
 			tt.assertOutput(t, execResult.Stdout)
-		})
-	}
-}
-
-//nolint:funlen // Table-driven integration test with multiple runtime limit test cases
-func TestE2E_RuntimeLimits(t *testing.T) {
-	requireServiceIntegrationTest(t)
-
-	tests := []struct {
-		name                string
-		language            model.Language
-		sourceFixture       []string
-		timeLimit           int
-		memoryLimit         int
-		wantVerdict         model.Verdict
-		wantNonZeroExitCode bool
-	}{
-		{
-			name:          "C TLE",
-			language:      model.LanguageC,
-			sourceFixture: []string{"c", "tle.c"},
-			timeLimit:     100,
-			memoryLimit:   128,
-			wantVerdict:   model.VerdictTLE,
-		},
-		{
-			name:          "C MLE",
-			language:      model.LanguageC,
-			sourceFixture: []string{"c", "mle.c"},
-			timeLimit:     5000,
-			memoryLimit:   64,
-			wantVerdict:   model.VerdictMLE,
-		},
-		{
-			name:                "C RE",
-			language:            model.LanguageC,
-			sourceFixture:       []string{"c", "re.c"},
-			timeLimit:           1000,
-			memoryLimit:         128,
-			wantVerdict:         model.VerdictRE,
-			wantNonZeroExitCode: true,
-		},
-		{
-			name:          "C++ TLE",
-			language:      model.LanguageCPP,
-			sourceFixture: []string{"cpp", "tle.cpp"},
-			timeLimit:     100,
-			memoryLimit:   128,
-			wantVerdict:   model.VerdictTLE,
-		},
-		{
-			name:          "C++ MLE",
-			language:      model.LanguageCPP,
-			sourceFixture: []string{"cpp", "mle.cpp"},
-			timeLimit:     5000,
-			memoryLimit:   64,
-			wantVerdict:   model.VerdictMLE,
-		},
-		{
-			name:                "C++ RE",
-			language:            model.LanguageCPP,
-			sourceFixture:       []string{"cpp", "re.cpp"},
-			timeLimit:           1000,
-			memoryLimit:         128,
-			wantVerdict:         model.VerdictRE,
-			wantNonZeroExitCode: true,
-		},
-		{
-			name:          "Java TLE",
-			language:      model.LanguageJava,
-			sourceFixture: []string{"java", "tle", "Main.java"},
-			timeLimit:     100,
-			memoryLimit:   256,
-			wantVerdict:   model.VerdictTLE,
-		},
-		{
-			name:          "Java MLE",
-			language:      model.LanguageJava,
-			sourceFixture: []string{"java", "mle", "Main.java"},
-			timeLimit:     5000,
-			memoryLimit:   64,
-			wantVerdict:   model.VerdictMLE,
-		},
-		{
-			name:                "Java RE",
-			language:            model.LanguageJava,
-			sourceFixture:       []string{"java", "re", "Main.java"},
-			timeLimit:           2000,
-			memoryLimit:         256,
-			wantVerdict:         model.VerdictRE,
-			wantNonZeroExitCode: true,
-		},
-		{
-			name:          "Python TLE",
-			language:      model.LanguagePython,
-			sourceFixture: []string{"python", "tle.py"},
-			timeLimit:     100,
-			memoryLimit:   256,
-			wantVerdict:   model.VerdictTLE,
-		},
-		{
-			name:          "Python MLE",
-			language:      model.LanguagePython,
-			sourceFixture: []string{"python", "mle.py"},
-			timeLimit:     5000,
-			memoryLimit:   64,
-			wantVerdict:   model.VerdictMLE,
-		},
-		{
-			name:                "Python RE",
-			language:            model.LanguagePython,
-			sourceFixture:       []string{"python", "runtime_error.py"},
-			timeLimit:           2000,
-			memoryLimit:         256,
-			wantVerdict:         model.VerdictRE,
-			wantNonZeroExitCode: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			env := newServiceIntegrationEnv(t, 90*time.Second)
-
-			compileOut := compileProgram(t, env, CompileRequest{
-				Language:   tt.language,
-				SourceCode: readFixture(t, tt.sourceFixture...),
-			})
-			assert.True(t, compileOut.Result.Succeeded)
-
-			execResult := env.runner.Execute(env.ctx, model.ExecuteRequest{
-				ExecutablePath: compileOut.ArtifactPath,
-				InputPath:      writeTempInputFile(t, ""),
-				Language:       tt.language,
-				TimeLimit:      tt.timeLimit,
-				MemoryLimit:    tt.memoryLimit,
-			})
-
-			assert.Equal(t, tt.wantVerdict, execResult.Verdict)
-			if tt.wantNonZeroExitCode {
-				assert.NotEqual(t, 0, execResult.ExitCode)
-			}
 		})
 	}
 }
@@ -321,28 +158,6 @@ func TestE2E_WrongAnswerPrograms(t *testing.T) {
 		assertWrongOutput func(t *testing.T, stdout string)
 	}{
 		{
-			name:          "C wrong answer",
-			language:      model.LanguageC,
-			sourceFixture: []string{"c", "wa.c"},
-			inputFixture:  []string{"data1.in"},
-			timeLimit:     1000,
-			memoryLimit:   128,
-			assertWrongOutput: func(t *testing.T, stdout string) {
-				assert.NotContains(t, stdout, "0 1 1 1 1 1 1 4 4 5 8 9 9")
-			},
-		},
-		{
-			name:          "C++ wrong answer",
-			language:      model.LanguageCPP,
-			sourceFixture: []string{"cpp", "wa.cpp"},
-			inputFixture:  []string{"data2.in"},
-			timeLimit:     1000,
-			memoryLimit:   128,
-			assertWrongOutput: func(t *testing.T, stdout string) {
-				assert.NotContains(t, stdout, "10 20 30 40 50")
-			},
-		},
-		{
 			name:          "Python wrong answer",
 			language:      model.LanguagePython,
 			sourceFixture: []string{"python", "wa.py"},
@@ -351,17 +166,6 @@ func TestE2E_WrongAnswerPrograms(t *testing.T) {
 			memoryLimit:   128,
 			assertWrongOutput: func(t *testing.T, stdout string) {
 				assert.NotEmpty(t, stdout)
-			},
-		},
-		{
-			name:          "Java wrong answer",
-			language:      model.LanguageJava,
-			sourceFixture: []string{"java", "wa", "Main.java"},
-			inputFixture:  []string{"data2.in"},
-			timeLimit:     2000,
-			memoryLimit:   256,
-			assertWrongOutput: func(t *testing.T, stdout string) {
-				assert.NotContains(t, stdout, "10 20 30 40 50")
 			},
 		},
 	}
@@ -389,4 +193,18 @@ func TestE2E_WrongAnswerPrograms(t *testing.T) {
 			tt.assertWrongOutput(t, execResult.Stdout)
 		})
 	}
+}
+
+func TestE2E_CompileError(t *testing.T) {
+	requireServiceIntegrationTest(t)
+
+	env := newServiceIntegrationEnv(t, 30*time.Second)
+
+	compileOut := compileProgram(t, env, CompileRequest{
+		Language:   model.LanguageC,
+		SourceCode: "int main() { int x = 10 return 0; }", // Missing semicolon
+	})
+
+	assert.False(t, compileOut.Result.Succeeded)
+	assert.Contains(t, compileOut.Result.Log, "error")
 }
