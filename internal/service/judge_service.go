@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"unicode"
 
 	"afterglow-judge-sandbox/internal/model"
 )
@@ -19,17 +18,29 @@ type JudgeService interface {
 
 // JudgeEngine implements JudgeService.
 type JudgeEngine struct {
-	runner   UserCodeRunner
-	compiler UserCodeCompiler
-	log      *slog.Logger
+	runner          UserCodeRunner
+	compiler        UserCodeCompiler
+	checkerCompiler CheckerCompiler
+	checkerRunner   CheckerRunner
+	resources       ResourceStore
+	log             *slog.Logger
 }
 
 // NewJudgeEngine creates a judge engine.
-func NewJudgeEngine(runner UserCodeRunner, compiler UserCodeCompiler) *JudgeEngine {
+func NewJudgeEngine(
+	runner UserCodeRunner,
+	compiler UserCodeCompiler,
+	checkerCompiler CheckerCompiler,
+	checkerRunner CheckerRunner,
+	resources ResourceStore,
+) *JudgeEngine {
 	return &JudgeEngine{
-		runner:   runner,
-		compiler: compiler,
-		log:      slog.Default(),
+		runner:          runner,
+		compiler:        compiler,
+		checkerCompiler: checkerCompiler,
+		checkerRunner:   checkerRunner,
+		resources:       resources,
+		log:             slog.Default(),
 	}
 }
 
@@ -76,11 +87,29 @@ func (s *JudgeEngine) Judge(ctx context.Context, req model.JudgeRequest) model.J
 		}
 	}
 
+	checkerOut, err := s.compileDefaultChecker(ctx)
+	if err != nil {
+		s.log.ErrorContext(ctx, "checker setup failed", "error", err)
+		return s.unknownJudgeResult(req.TestCases, compileOut.Result, fmt.Sprintf("checker setup failed: %v", err))
+	}
+	if !checkerOut.Result.Succeeded {
+		message := strings.TrimSpace(checkerOut.Result.Log)
+		if message == "" {
+			message = "checker compilation failed"
+		}
+		s.log.ErrorContext(ctx, "checker compilation failed", "log", message)
+		return s.unknownJudgeResult(req.TestCases, compileOut.Result, fmt.Sprintf("checker compilation failed: %s", message))
+	}
+	if checkerOut.Artifact == nil {
+		s.log.ErrorContext(ctx, "checker compilation succeeded without artifact")
+		return s.unknownJudgeResult(req.TestCases, compileOut.Result, "checker compilation succeeded without artifact")
+	}
+
 	caseResults := make([]model.JudgeCaseResult, 0, len(req.TestCases))
 	passedCount := 0
 
 	for _, testCase := range req.TestCases {
-		caseResult := s.runSingleCase(ctx, req, compileOut, testCase)
+		caseResult := s.runSingleCase(ctx, req, compileOut, *checkerOut.Artifact, testCase)
 		if caseResult.Verdict == model.VerdictOK {
 			passedCount++
 		}
@@ -115,10 +144,39 @@ func validateJudgeRequest(req model.JudgeRequest) error {
 	return nil
 }
 
+func (s *JudgeEngine) compileDefaultChecker(ctx context.Context) (CheckerCompileOutput, error) {
+	if s.resources == nil {
+		return CheckerCompileOutput{}, errors.New("resource store is required")
+	}
+	if s.checkerCompiler == nil {
+		return CheckerCompileOutput{}, errors.New("checker compiler is required")
+	}
+
+	checkerSource, err := s.resources.Get(ctx, defaultCheckerSourceKey)
+	if err != nil {
+		return CheckerCompileOutput{}, fmt.Errorf("load %q: %w", defaultCheckerSourceKey, err)
+	}
+
+	testlibHeader, err := s.resources.Get(ctx, testlibHeaderKey)
+	if err != nil {
+		return CheckerCompileOutput{}, fmt.Errorf("load %q: %w", testlibHeaderKey, err)
+	}
+
+	return s.checkerCompiler.Compile(ctx, CheckerCompileRequest{
+		SourceCode: checkerSource,
+		SupportFiles: []CompileFile{{
+			Name:    testlibHeaderKey,
+			Content: testlibHeader,
+			Mode:    0o644,
+		}},
+	})
+}
+
 func (s *JudgeEngine) runSingleCase(
 	ctx context.Context,
 	req model.JudgeRequest,
 	compileOut UserCodeCompileOutput,
+	checkerArtifact model.CompiledArtifact,
 	testCase model.JudgeTestCase,
 ) model.JudgeCaseResult {
 	if compileOut.Artifact == nil {
@@ -137,6 +195,7 @@ func (s *JudgeEngine) runSingleCase(
 		MemoryLimit: req.MemoryLimit,
 	})
 	if err != nil {
+		s.log.ErrorContext(ctx, "program execution failed", "testCase", testCase.Name, "error", err)
 		return model.JudgeCaseResult{
 			Name:      testCase.Name,
 			Verdict:   model.VerdictUKE,
@@ -146,9 +205,28 @@ func (s *JudgeEngine) runSingleCase(
 
 	finalVerdict := runResult.Verdict
 	extraInfo := runResult.ExtraInfo
-	if runResult.Verdict == model.VerdictOK && !outputsMatch(runResult.Stdout, testCase.ExpectedOutput) {
-		finalVerdict = model.VerdictWA
-		extraInfo = "stdout does not match expected output"
+	if runResult.Verdict == model.VerdictOK {
+		if s.checkerRunner == nil {
+			finalVerdict = model.VerdictUKE
+			extraInfo = "checker runner is required"
+		}
+
+		if finalVerdict == model.VerdictOK {
+			checkerResult, err := s.checkerRunner.Run(ctx, CheckerRunRequest{
+				Checker:        checkerArtifact,
+				InputText:      testCase.InputText,
+				ActualOutput:   runResult.Stdout,
+				ExpectedOutput: testCase.ExpectedOutput,
+			})
+			if err != nil {
+				s.log.ErrorContext(ctx, "checker execution failed", "testCase", testCase.Name, "error", err)
+				finalVerdict = model.VerdictUKE
+				extraInfo = fmt.Sprintf("checker infrastructure error: %v", err)
+			} else {
+				finalVerdict = checkerResult.Verdict
+				extraInfo = checkerMessageOrDefault(checkerResult)
+			}
+		}
 	}
 
 	return model.JudgeCaseResult{
@@ -162,12 +240,39 @@ func (s *JudgeEngine) runSingleCase(
 	}
 }
 
-func outputsMatch(actual, expected string) bool {
-	return normalizeOutput(actual) == normalizeOutput(expected)
+func (s *JudgeEngine) unknownJudgeResult(
+	testCases []model.JudgeTestCase,
+	compileResult model.CompileResult,
+	message string,
+) model.JudgeResult {
+	caseResults := make([]model.JudgeCaseResult, 0, len(testCases))
+	for _, testCase := range testCases {
+		caseResults = append(caseResults, model.JudgeCaseResult{
+			Name:      testCase.Name,
+			Verdict:   model.VerdictUKE,
+			ExtraInfo: message,
+		})
+	}
+
+	return model.JudgeResult{
+		Verdict:    model.VerdictUKE,
+		Compile:    compileResult,
+		Cases:      caseResults,
+		TotalCount: len(testCases),
+	}
 }
 
-func normalizeOutput(content string) string {
-	return strings.TrimRightFunc(content, unicode.IsSpace)
+func checkerMessageOrDefault(result CheckerRunResult) string {
+	if result.Message != "" {
+		return result.Message
+	}
+	if result.Verdict == model.VerdictWA {
+		return "checker reported wrong answer"
+	}
+	if result.Verdict == model.VerdictUKE {
+		return "checker reported infrastructure failure"
+	}
+	return ""
 }
 
 func aggregateJudgeVerdict(cases []model.JudgeCaseResult) model.Verdict {

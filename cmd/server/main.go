@@ -52,7 +52,8 @@ func initializeComponents(cfg *config.Config) (service.JudgeService, error) {
 	sb := sandbox.NewContainerdSandbox(cfg.ContainerdSocket, cfg.ContainerdNamespace)
 
 	// 2. Load bundled internal resources before the service starts listening.
-	if _, err := storage.NewBundledInternalStorage(); err != nil {
+	internalStorage, err := storage.NewBundledInternalStorage()
+	if err != nil {
 		return nil, fmt.Errorf("initialize internal storage: %w", err)
 	}
 
@@ -64,10 +65,24 @@ func initializeComponents(cfg *config.Config) (service.JudgeService, error) {
 		cacheStorage = nil // Allow running without cache
 	}
 
-	// 4. Inject dependencies into Runner and Compiler
-	runner := service.NewUserCodeRunner(service.NewRunner(sb))
-	compiler := service.NewUserCodeCompiler(service.NewCompiler(sb, cacheStorage))
-	judge := service.NewJudgeEngine(runner, compiler)
+	// 4. Create base compiler and runner primitives.
+	baseCompiler := service.NewCompiler(sb, cacheStorage)
+	baseRunner := service.NewRunner(sb)
+
+	// 5. Create semantic-layer services.
+	userCodeCompiler := service.NewUserCodeCompiler(baseCompiler)
+	userCodeRunner := service.NewUserCodeRunner(baseRunner)
+	checkerCompiler := service.NewCheckerCompiler(baseCompiler)
+	checkerRunner := service.NewCheckerRunner(baseRunner)
+
+	// 6. Create judge engine with internal checker resources.
+	judge := service.NewJudgeEngine(
+		userCodeRunner,
+		userCodeCompiler,
+		checkerCompiler,
+		checkerRunner,
+		internalStorage,
+	)
 
 	ctx := context.Background()
 	if err := judge.PreflightCheck(ctx); err != nil {

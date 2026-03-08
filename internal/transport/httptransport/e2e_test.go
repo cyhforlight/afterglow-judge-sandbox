@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -27,16 +28,42 @@ func requireE2EPrerequisites(t *testing.T) {
 	}
 }
 
+func projectRoot(t *testing.T) string {
+	t.Helper()
+
+	dir, err := os.Getwd()
+	require.NoError(t, err)
+
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("failed to locate project root")
+		}
+		dir = parent
+	}
+}
+
 func newE2EHandler(t *testing.T) *Handler {
 	t.Helper()
 
 	sb := sandbox.NewContainerdSandbox("/run/containerd/containerd.sock", "")
+	internalStorage, err := storage.NewInternalStorage(filepath.Join(projectRoot(t), "support"))
+	require.NoError(t, err)
 	cacheDir := t.TempDir()
 	cacheStorage, err := storage.NewCacheStorage(cacheDir, 100)
 	require.NoError(t, err)
-	compiler := service.NewUserCodeCompiler(service.NewCompiler(sb, cacheStorage))
-	runner := service.NewUserCodeRunner(service.NewRunner(sb))
-	judge := service.NewJudgeEngine(runner, compiler)
+
+	baseCompiler := service.NewCompiler(sb, cacheStorage)
+	baseRunner := service.NewRunner(sb)
+	compiler := service.NewUserCodeCompiler(baseCompiler)
+	runner := service.NewUserCodeRunner(baseRunner)
+	checkerCompiler := service.NewCheckerCompiler(baseCompiler)
+	checkerRunner := service.NewCheckerRunner(baseRunner)
+	judge := service.NewJudgeEngine(runner, compiler, checkerCompiler, checkerRunner, internalStorage)
 
 	ctx := context.Background()
 	if err := judge.PreflightCheck(ctx); err != nil {
