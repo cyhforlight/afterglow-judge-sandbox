@@ -5,8 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
+	"strings"
 
 	"afterglow-judge-sandbox/internal/model"
 	"afterglow-judge-sandbox/internal/sandbox"
@@ -60,36 +59,38 @@ func (r *ContainerdRunner) execute(ctx context.Context, req model.ExecuteRequest
 	if !ok {
 		return model.ExecuteResult{}, fmt.Errorf("no run profile for language %q", req.Language)
 	}
+	if len(req.Program.Data) == 0 {
+		return model.ExecuteResult{}, fmt.Errorf("program data is required")
+	}
 
-	tmpDir, err := os.MkdirTemp("", "sandbox-exec-*")
+	ws, err := NewWorkspace()
 	if err != nil {
-		return model.ExecuteResult{}, fmt.Errorf("create temp dir: %w", err)
+		return model.ExecuteResult{}, fmt.Errorf("create workspace: %w", err)
 	}
-	defer func() { _ = os.RemoveAll(tmpDir) }()
+	defer func() { _ = ws.Cleanup() }()
 
-	programPath := filepath.Join(tmpDir, profile.ArtifactName)
-	if err := copyFile(req.ExecutablePath, programPath, profile.FileMode); err != nil {
-		return model.ExecuteResult{}, fmt.Errorf("copy program file: %w", err)
+	programMode := req.Program.Mode
+	if programMode == 0 {
+		programMode = profile.FileMode
 	}
-
-	inputFile, err := os.Open(req.InputPath) //nolint:gosec // G304: path is from validated user input
-	if err != nil {
-		return model.ExecuteResult{}, fmt.Errorf("open input file: %w", err)
+	if err := ws.WriteFile(profile.ArtifactName, req.Program.Data, programMode); err != nil {
+		return model.ExecuteResult{}, fmt.Errorf("write program file: %w", err)
 	}
-	defer func() { _ = inputFile.Close() }()
 
 	containerPath := "/sandbox/" + profile.ArtifactName
 	args := profile.RuntimeCommand(containerPath)
+	cwd := "/sandbox"
 
 	sandboxReq := sandbox.ExecuteRequest{
 		ImageRef: profile.ImageRef,
 		Command:  args,
-		Mounts: []sandbox.Mount{{
-			HostPath:      tmpDir,
+		MountDir: &sandbox.Mount{
+			HostPath:      ws.Dir(),
 			ContainerPath: "/sandbox",
 			ReadOnly:      true,
-		}},
-		Stdin: inputFile,
+		},
+		Cwd:   &cwd,
+		Stdin: strings.NewReader(req.Input),
 		Limits: sandbox.ResourceLimits{
 			CPUTimeMs:   req.TimeLimit,
 			WallTimeMs:  req.TimeLimit * 3,
@@ -132,17 +133,6 @@ func convertVerdict(v sandbox.Verdict) model.Verdict {
 	default:
 		return model.VerdictUKE
 	}
-}
-
-func copyFile(src, dst string, perm os.FileMode) error {
-	data, err := os.ReadFile(src) //nolint:gosec // G304: paths are from validated configuration
-	if err != nil {
-		return fmt.Errorf("read source file %q: %w", src, err)
-	}
-	if err := os.WriteFile(dst, data, perm); err != nil {
-		return fmt.Errorf("write destination file %q: %w", dst, err)
-	}
-	return nil
 }
 
 func buildInfraFailureResult(err error) model.ExecuteResult {

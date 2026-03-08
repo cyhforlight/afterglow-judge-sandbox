@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"afterglow-judge-sandbox/internal/cache"
 	"afterglow-judge-sandbox/internal/sandbox"
 	"afterglow-judge-sandbox/internal/service"
 
@@ -30,7 +31,10 @@ func newE2EHandler(t *testing.T) *Handler {
 	t.Helper()
 
 	sb := sandbox.NewContainerdSandbox("/run/containerd/containerd.sock")
-	compiler := service.NewContainerCompiler(sb, nil) // nil cache for tests
+	cacheDir := t.TempDir()
+	compileCache, err := cache.NewCompileCacheForTest(cacheDir, 100)
+	require.NoError(t, err)
+	compiler := service.NewContainerCompiler(sb, compileCache)
 	runner := service.NewContainerdRunner(sb)
 	judge := service.NewJudgeEngine(runner, compiler)
 

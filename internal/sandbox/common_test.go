@@ -13,6 +13,14 @@ const (
 
 func requireSandboxIntegrationTest(t *testing.T) {
 	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	sb := NewContainerdSandbox("")
+	if err := sb.PreflightCheck(ctx); err != nil {
+		t.Skipf("sandbox integration environment unavailable: %v", err)
+	}
 }
 
 func newSandboxTestContext(t *testing.T, timeout time.Duration) context.Context {

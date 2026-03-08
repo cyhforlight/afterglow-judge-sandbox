@@ -43,6 +43,14 @@ func (r *fakeRunner) Execute(_ context.Context, _ model.ExecuteRequest) model.Ex
 	return r.results[idx]
 }
 
+func testCompiledArtifact() *model.CompiledArtifact {
+	return &model.CompiledArtifact{
+		Name: "program",
+		Data: []byte("binary"),
+		Mode: 0o755,
+	}
+}
+
 func TestJudgeEngine_CompileError(t *testing.T) {
 	engine := NewJudgeEngine(&fakeRunner{}, &fakeCompiler{output: CompileOutput{
 		Result: model.CompileResult{Succeeded: false, Log: "compile failed"},
@@ -68,7 +76,7 @@ func TestJudgeEngine_CompileError(t *testing.T) {
 func TestJudgeEngine_WrongAnswerAfterOK(t *testing.T) {
 	engine := NewJudgeEngine(&fakeRunner{result: model.ExecuteResult{Verdict: model.VerdictOK, Stdout: "41\n"}}, &fakeCompiler{output: CompileOutput{
 		Result:          model.CompileResult{Succeeded: true},
-		ArtifactPath:    "/tmp/program",
+		Artifact:        testCompiledArtifact(),
 		RuntimeLanguage: model.LanguageCPP,
 	}})
 
@@ -91,7 +99,7 @@ func TestJudgeEngine_WrongAnswerAfterOK(t *testing.T) {
 func TestJudgeEngine_TrimTrailingSpaceCompare(t *testing.T) {
 	engine := NewJudgeEngine(&fakeRunner{result: model.ExecuteResult{Verdict: model.VerdictOK, Stdout: "42\n\n"}}, &fakeCompiler{output: CompileOutput{
 		Result:          model.CompileResult{Succeeded: true},
-		ArtifactPath:    "/tmp/program",
+		Artifact:        testCompiledArtifact(),
 		RuntimeLanguage: model.LanguageCPP,
 	}})
 
@@ -120,7 +128,7 @@ func TestJudgeEngine_AggregateRuntimePriority(t *testing.T) {
 	}}
 	engine := NewJudgeEngine(runner, &fakeCompiler{output: CompileOutput{
 		Result:          model.CompileResult{Succeeded: true},
-		ArtifactPath:    "/tmp/program",
+		Artifact:        testCompiledArtifact(),
 		RuntimeLanguage: model.LanguageCPP,
 	}})
 
@@ -169,7 +177,7 @@ func TestJudgeEngine_MultipleTestCases_MixedResults(t *testing.T) {
 	}}
 	engine := NewJudgeEngine(runner, &fakeCompiler{output: CompileOutput{
 		Result:          model.CompileResult{Succeeded: true},
-		ArtifactPath:    "/tmp/program",
+		Artifact:        testCompiledArtifact(),
 		RuntimeLanguage: model.LanguageCPP,
 	}})
 
@@ -218,7 +226,7 @@ func TestJudgeEngine_AllTestCasesPass(t *testing.T) {
 	}}
 	engine := NewJudgeEngine(runner, &fakeCompiler{output: CompileOutput{
 		Result:          model.CompileResult{Succeeded: true},
-		ArtifactPath:    "/tmp/program",
+		Artifact:        testCompiledArtifact(),
 		RuntimeLanguage: model.LanguageCPP,
 	}})
 
@@ -263,7 +271,7 @@ func TestJudgeEngine_SingleTestCase(t *testing.T) {
 	}}
 	engine := NewJudgeEngine(runner, &fakeCompiler{output: CompileOutput{
 		Result:          model.CompileResult{Succeeded: true},
-		ArtifactPath:    "/tmp/program",
+		Artifact:        testCompiledArtifact(),
 		RuntimeLanguage: model.LanguagePython,
 	}})
 

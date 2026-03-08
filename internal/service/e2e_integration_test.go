@@ -87,17 +87,17 @@ public class Main {
 			})
 			assert.True(t, compileOut.Result.Succeeded)
 
-			inputPath := fixturePath(t, tt.inputFixture...)
-			if len(tt.inputFixture) == 0 {
-				inputPath = writeTempInputFile(t, tt.inputText)
+			inputText := tt.inputText
+			if len(tt.inputFixture) > 0 {
+				inputText = readFixture(t, tt.inputFixture...)
 			}
 
 			execResult := env.runner.Execute(env.ctx, model.ExecuteRequest{
-				ExecutablePath: compileOut.ArtifactPath,
-				InputPath:      inputPath,
-				Language:       tt.language,
-				TimeLimit:      tt.timeLimit,
-				MemoryLimit:    tt.memoryLimit,
+				Program:     *compileOut.Artifact,
+				Input:       inputText,
+				Language:    tt.language,
+				TimeLimit:   tt.timeLimit,
+				MemoryLimit: tt.memoryLimit,
 			})
 
 			assert.Equal(t, model.VerdictOK, execResult.Verdict)
@@ -130,11 +130,11 @@ func TestE2E_AllTestData(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			execResult := env.runner.Execute(env.ctx, model.ExecuteRequest{
-				ExecutablePath: compileOut.ArtifactPath,
-				InputPath:      fixturePath(t, tc.inputFile...),
-				Language:       model.LanguageCPP,
-				TimeLimit:      1000,
-				MemoryLimit:    128,
+				Program:     *compileOut.Artifact,
+				Input:       readFixture(t, tc.inputFile...),
+				Language:    model.LanguageCPP,
+				TimeLimit:   1000,
+				MemoryLimit: 128,
 			})
 
 			assert.Equal(t, model.VerdictOK, execResult.Verdict)
@@ -181,11 +181,11 @@ func TestE2E_WrongAnswerPrograms(t *testing.T) {
 			assert.True(t, compileOut.Result.Succeeded)
 
 			execResult := env.runner.Execute(env.ctx, model.ExecuteRequest{
-				ExecutablePath: compileOut.ArtifactPath,
-				InputPath:      fixturePath(t, tt.inputFixture...),
-				Language:       tt.language,
-				TimeLimit:      tt.timeLimit,
-				MemoryLimit:    tt.memoryLimit,
+				Program:     *compileOut.Artifact,
+				Input:       readFixture(t, tt.inputFixture...),
+				Language:    tt.language,
+				TimeLimit:   tt.timeLimit,
+				MemoryLimit: tt.memoryLimit,
 			})
 
 			assert.Equal(t, model.VerdictOK, execResult.Verdict)

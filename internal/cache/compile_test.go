@@ -16,11 +16,7 @@ func TestCompileCache_PutAndGet(t *testing.T) {
 	cache, err := NewCompileCacheForTest(tmpDir, 10)
 	require.NoError(t, err)
 
-	// Create a temporary artifact file
-	artifactPath := createTempArtifact(t, "binary content")
-
-	// Put artifact in cache
-	err = cache.Put("key1", artifactPath, "compile log", model.LanguageC)
+	err = cache.Put("key1", createCompiledArtifact("program", "binary content", 0o755), "compile log", model.LanguageC)
 	require.NoError(t, err)
 
 	// Get artifact from cache
@@ -28,11 +24,9 @@ func TestCompileCache_PutAndGet(t *testing.T) {
 	require.True(t, ok, "cache should contain key1")
 	assert.Equal(t, "compile log", cached.CompileLog)
 	assert.Equal(t, model.LanguageC, cached.Language)
-
-	// Verify cached file exists and has correct content
-	data, err := os.ReadFile(cached.ArtifactPath)
-	require.NoError(t, err)
-	assert.Equal(t, "binary content", string(data))
+	assert.Equal(t, "program", cached.Artifact.Name)
+	assert.Equal(t, []byte("binary content"), cached.Artifact.Data)
+	assert.Equal(t, os.FileMode(0o755), cached.Artifact.Mode)
 }
 
 func TestCompileCache_MissOnNonexistent(t *testing.T) {
@@ -49,17 +43,11 @@ func TestCompileCache_EvictionRemovesFile(t *testing.T) {
 	cache, err := NewCompileCacheForTest(tmpDir, 2) // max 2 entries
 	require.NoError(t, err)
 
-	// Create 3 temporary artifact files
-	artifact1 := createTempArtifact(t, "binary1")
-	artifact2 := createTempArtifact(t, "binary2")
-	artifact3 := createTempArtifact(t, "binary3")
-
-	// Put 3 artifacts, the 3rd should evict the 1st
-	err = cache.Put("key1", artifact1, "log1", model.LanguageC)
+	err = cache.Put("key1", createCompiledArtifact("program1", "binary1", 0o755), "log1", model.LanguageC)
 	require.NoError(t, err)
-	err = cache.Put("key2", artifact2, "log2", model.LanguageC)
+	err = cache.Put("key2", createCompiledArtifact("program2", "binary2", 0o755), "log2", model.LanguageC)
 	require.NoError(t, err)
-	err = cache.Put("key3", artifact3, "log3", model.LanguageC)
+	err = cache.Put("key3", createCompiledArtifact("program3", "binary3", 0o755), "log3", model.LanguageC)
 	require.NoError(t, err)
 
 	// Verify key1 was evicted
@@ -83,19 +71,14 @@ func TestCompileCache_LRUOrdering(t *testing.T) {
 	cache, err := NewCompileCacheForTest(tmpDir, 2)
 	require.NoError(t, err)
 
-	artifact1 := createTempArtifact(t, "binary1")
-	artifact2 := createTempArtifact(t, "binary2")
-	artifact3 := createTempArtifact(t, "binary3")
-
-	// Add key1 and key2
-	require.NoError(t, cache.Put("key1", artifact1, "log1", model.LanguageC))
-	require.NoError(t, cache.Put("key2", artifact2, "log2", model.LanguageC))
+	require.NoError(t, cache.Put("key1", createCompiledArtifact("program1", "binary1", 0o755), "log1", model.LanguageC))
+	require.NoError(t, cache.Put("key2", createCompiledArtifact("program2", "binary2", 0o755), "log2", model.LanguageC))
 
 	// Access key1 to make it recently used
 	cache.Get("key1")
 
 	// Add key3, should evict key2 (least recently used)
-	require.NoError(t, cache.Put("key3", artifact3, "log3", model.LanguageC))
+	require.NoError(t, cache.Put("key3", createCompiledArtifact("program3", "binary3", 0o755), "log3", model.LanguageC))
 
 	// Verify key2 was evicted, key1 and key3 remain
 	_, ok := cache.Get("key2")
@@ -114,8 +97,7 @@ func TestCompileCache_Stats(t *testing.T) {
 	stats := cache.Stats()
 	assert.Equal(t, 0, stats.Entries)
 
-	artifact := createTempArtifact(t, "binary")
-	require.NoError(t, cache.Put("key1", artifact, "log", model.LanguageC))
+	require.NoError(t, cache.Put("key1", createCompiledArtifact("program", "binary", 0o755), "log", model.LanguageC))
 
 	stats = cache.Stats()
 	assert.Equal(t, 1, stats.Entries)
@@ -151,15 +133,10 @@ func TestCompileCache_OrphanCleanup(t *testing.T) {
 	assert.Equal(t, 0, stats.Entries, "cache should start empty after cleanup")
 }
 
-// createTempArtifact creates a temporary file with the given content.
-func createTempArtifact(t *testing.T, content string) string {
-	t.Helper()
-	f, err := os.CreateTemp("", "artifact-*")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = f.Close() })
-
-	_, err = f.WriteString(content)
-	require.NoError(t, err)
-
-	return f.Name()
+func createCompiledArtifact(name, content string, mode os.FileMode) model.CompiledArtifact {
+	return model.CompiledArtifact{
+		Name: name,
+		Data: []byte(content),
+		Mode: mode,
+	}
 }

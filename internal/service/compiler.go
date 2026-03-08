@@ -24,9 +24,8 @@ type CompileRequest struct {
 // CompileOutput is the compiler output consumed by the judge service.
 type CompileOutput struct {
 	Result          model.CompileResult
-	ArtifactPath    string
+	Artifact        *model.CompiledArtifact
 	RuntimeLanguage model.Language
-	Cleanup         func()
 }
 
 // Compiler compiles source code to a runnable artifact.
@@ -62,7 +61,7 @@ func (c *ContainerCompiler) Compile(ctx context.Context, req CompileRequest) (Co
 
 	// 1. Try to get from cache
 	if c.cache != nil {
-		if cachedOut, ok := c.tryGetFromCache(ctx, cacheKey, profile); ok {
+		if cachedOut, ok := c.tryGetFromCache(ctx, cacheKey); ok {
 			return cachedOut, nil
 		}
 		slog.InfoContext(ctx, "compilation cache miss", "key", cacheKey[:16])
@@ -79,23 +78,33 @@ func (c *ContainerCompiler) Compile(ctx context.Context, req CompileRequest) (Co
 		return out, nil
 	}
 
-	// 4. Compilation succeeded, try to cache (failure is acceptable)
-	if c.cache != nil {
-		if err := c.cache.Put(cacheKey, out.ArtifactPath, out.Result.Log, out.RuntimeLanguage); err != nil {
-			slog.WarnContext(ctx, "failed to cache compilation", "error", err)
-			// Cache failure doesn't affect the result, continue returning the artifact
-		}
+	if out.Artifact == nil {
+		return out, errors.New("compile succeeded but artifact is missing")
 	}
+	if c.cache == nil {
+		return out, nil
+	}
+
+	if err := c.cache.Put(cacheKey, *out.Artifact, out.Result.Log, out.RuntimeLanguage); err != nil {
+		slog.WarnContext(ctx, "failed to cache compilation artifact", "error", err)
+		return out, nil
+	}
+
+	cached, ok := c.cache.Get(cacheKey)
+	if !ok {
+		slog.WarnContext(ctx, "failed to read just-cached artifact", "key", cacheKey[:16])
+		return out, nil
+	}
+	out.Artifact = &cached.Artifact
 
 	return out, nil
 }
 
-// tryGetFromCache attempts to retrieve and copy a cached artifact.
+// tryGetFromCache attempts to retrieve a cached artifact.
 // Returns (output, true) on success, (empty, false) on cache miss or error.
 func (c *ContainerCompiler) tryGetFromCache(
 	ctx context.Context,
 	cacheKey string,
-	profile sandbox.LanguageProfile,
 ) (CompileOutput, bool) {
 	cached, ok := c.cache.Get(cacheKey)
 	if !ok {
@@ -104,34 +113,10 @@ func (c *ContainerCompiler) tryGetFromCache(
 
 	slog.InfoContext(ctx, "compilation cache hit", "key", cacheKey[:16])
 
-	// Copy cached artifact to request-local workspace
-	ws, err := sandbox.NewWorkspace()
-	if err != nil {
-		slog.WarnContext(ctx, "failed to create workspace for cached artifact", "error", err)
-		return CompileOutput{}, false
-	}
-
-	artifactName := profile.Compile.ArtifactName
-	localPath := filepath.Join(ws.Dir(), artifactName)
-
-	data, err := os.ReadFile(cached.ArtifactPath)
-	if err != nil {
-		slog.WarnContext(ctx, "failed to read cached artifact", "error", err)
-		_ = ws.Cleanup()
-		return CompileOutput{}, false
-	}
-
-	if err := os.WriteFile(localPath, data, 0644); err != nil {
-		slog.WarnContext(ctx, "failed to copy cached artifact", "error", err)
-		_ = ws.Cleanup()
-		return CompileOutput{}, false
-	}
-
 	return CompileOutput{
 		Result:          model.CompileResult{Succeeded: true, Log: cached.CompileLog},
-		ArtifactPath:    localPath,
+		Artifact:        &cached.Artifact,
 		RuntimeLanguage: cached.Language,
-		Cleanup:         func() { _ = ws.Cleanup() },
 	}, true
 }
 
@@ -144,12 +129,11 @@ func (c *ContainerCompiler) compileInContainer(
 	var out CompileOutput
 	out.RuntimeLanguage = req.Language
 
-	ws, err := sandbox.NewWorkspace()
+	ws, err := NewWorkspace()
 	if err != nil {
 		return out, fmt.Errorf("create workspace: %w", err)
 	}
-
-	out.Cleanup = func() { _ = ws.Cleanup() }
+	defer func() { _ = ws.Cleanup() }()
 
 	if err := ws.WriteFile(profile.Compile.SourceFiles[0], []byte(req.SourceCode), 0644); err != nil {
 		return out, fmt.Errorf("write source file: %w", err)
@@ -158,11 +142,11 @@ func (c *ContainerCompiler) compileInContainer(
 	compileReq := sandbox.ExecuteRequest{
 		ImageRef: profile.Compile.ImageRef,
 		Command:  profile.Compile.BuildCommand(ws.Dir(), profile.Compile.SourceFiles),
-		Mounts: []sandbox.Mount{{
+		MountDir: &sandbox.Mount{
 			HostPath:      ws.Dir(),
 			ContainerPath: "/work",
 			ReadOnly:      false,
-		}},
+		},
 		Limits: sandbox.ResourceLimits{
 			CPUTimeMs:   profile.Compile.TimeoutMs,
 			WallTimeMs:  profile.Compile.TimeoutMs * 3,
@@ -215,7 +199,12 @@ func (c *ContainerCompiler) compileInContainer(
 		}
 	}
 
-	out.ArtifactPath = artifactPath
+	artifact, err := loadCompiledArtifact(artifactPath)
+	if err != nil {
+		return out, fmt.Errorf("read compiled artifact: %w", err)
+	}
+
+	out.Artifact = &artifact
 	return out, nil
 }
 
@@ -228,6 +217,8 @@ func NewHostCompiler() *HostCompiler {
 }
 
 // Compile compiles source code based on language profile.
+//
+// Deprecated: HostCompiler is for local testing only. Use ContainerCompiler in production.
 func (c *HostCompiler) Compile(ctx context.Context, req CompileRequest) (CompileOutput, error) {
 	var out CompileOutput
 
@@ -235,8 +226,7 @@ func (c *HostCompiler) Compile(ctx context.Context, req CompileRequest) (Compile
 	if err != nil {
 		return out, fmt.Errorf("create compile temp dir: %w", err)
 	}
-
-	out.Cleanup = func() { _ = os.RemoveAll(workDir) }
+	defer func() { _ = os.RemoveAll(workDir) }()
 
 	sourcePath, artifactPath, compileLog, succeeded, err := compileByLanguage(ctx, workDir, req)
 	if err != nil {
@@ -244,24 +234,44 @@ func (c *HostCompiler) Compile(ctx context.Context, req CompileRequest) (Compile
 		if errors.As(err, &compileErr) {
 			out.Result = model.CompileResult{Succeeded: false, Log: compileErr.log}
 			out.RuntimeLanguage = req.Language
-			out.ArtifactPath = ""
 			return out, nil
 		}
-		out.Cleanup()
 		return out, err
 	}
 
 	_ = sourcePath
 	out.Result = model.CompileResult{Succeeded: succeeded, Log: compileLog}
 	if !succeeded {
-		out.ArtifactPath = ""
 		out.RuntimeLanguage = req.Language
 		return out, nil
 	}
 
-	out.ArtifactPath = artifactPath
+	artifact, err := loadCompiledArtifact(artifactPath)
+	if err != nil {
+		return out, fmt.Errorf("read compiled artifact: %w", err)
+	}
+
+	out.Artifact = &artifact
 	out.RuntimeLanguage = req.Language
 	return out, nil
+}
+
+func loadCompiledArtifact(path string) (model.CompiledArtifact, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return model.CompiledArtifact{}, fmt.Errorf("stat artifact %q: %w", path, err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return model.CompiledArtifact{}, fmt.Errorf("read artifact %q: %w", path, err)
+	}
+
+	return model.CompiledArtifact{
+		Name: filepath.Base(path),
+		Data: data,
+		Mode: info.Mode().Perm(),
+	}, nil
 }
 
 type compileFailureError struct {

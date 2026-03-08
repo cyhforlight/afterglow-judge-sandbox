@@ -17,7 +17,8 @@ type Sandbox interface {
 type ExecuteRequest struct {
 	ImageRef string
 	Command  []string
-	Mounts   []Mount
+	MountDir *Mount
+	Cwd      *string
 	Stdin    io.Reader
 	Limits   ResourceLimits
 }

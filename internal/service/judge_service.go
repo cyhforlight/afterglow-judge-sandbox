@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"unicode"
 
@@ -67,9 +66,6 @@ func (s *JudgeEngine) Judge(ctx context.Context, req model.JudgeRequest) model.J
 			TotalCount: len(req.TestCases),
 		}
 	}
-	if compileOut.Cleanup != nil {
-		defer compileOut.Cleanup()
-	}
 
 	if !compileOut.Result.Succeeded {
 		return model.JudgeResult{
@@ -125,34 +121,20 @@ func (s *JudgeEngine) runSingleCase(
 	compileOut CompileOutput,
 	testCase model.JudgeTestCase,
 ) model.JudgeCaseResult {
-	inputFile, err := os.CreateTemp("", "judge-input-*.txt")
-	if err != nil {
+	if compileOut.Artifact == nil {
 		return model.JudgeCaseResult{
 			Name:      testCase.Name,
 			Verdict:   model.VerdictUKE,
-			ExtraInfo: fmt.Sprintf("create input temp file: %v", err),
-		}
-	}
-	inputPath := inputFile.Name()
-	defer func() {
-		_ = inputFile.Close()
-		_ = os.Remove(inputPath)
-	}()
-
-	if _, err := inputFile.WriteString(testCase.InputText); err != nil {
-		return model.JudgeCaseResult{
-			Name:      testCase.Name,
-			Verdict:   model.VerdictUKE,
-			ExtraInfo: fmt.Sprintf("write input temp file: %v", err),
+			ExtraInfo: "compiled artifact is missing",
 		}
 	}
 
 	runResult := s.runner.Execute(ctx, model.ExecuteRequest{
-		ExecutablePath: compileOut.ArtifactPath,
-		InputPath:      inputPath,
-		Language:       compileOut.RuntimeLanguage,
-		TimeLimit:      req.TimeLimit,
-		MemoryLimit:    req.MemoryLimit,
+		Program:     *compileOut.Artifact,
+		Input:       testCase.InputText,
+		Language:    compileOut.RuntimeLanguage,
+		TimeLimit:   req.TimeLimit,
+		MemoryLimit: req.MemoryLimit,
 	})
 
 	finalVerdict := runResult.Verdict

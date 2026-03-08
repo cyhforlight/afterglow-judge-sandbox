@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"afterglow-judge-sandbox/internal/cache"
 	"afterglow-judge-sandbox/internal/sandbox"
 
 	"github.com/stretchr/testify/require"
@@ -27,6 +28,14 @@ var (
 
 func requireServiceIntegrationTest(t *testing.T) {
 	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	sb := sandbox.NewContainerdSandbox("")
+	if err := sb.PreflightCheck(ctx); err != nil {
+		t.Skipf("service integration environment unavailable: %v", err)
+	}
 }
 
 func projectRoot(t *testing.T) string {
@@ -85,7 +94,10 @@ func newIntegrationContext(t *testing.T, timeout time.Duration) context.Context 
 func newContainerCompilerForTest(t *testing.T) *ContainerCompiler {
 	t.Helper()
 	sb := sandbox.NewContainerdSandbox("")
-	return NewContainerCompiler(sb, nil) // nil cache for tests
+	cacheDir := t.TempDir()
+	compileCache, err := cache.NewCompileCacheForTest(cacheDir, 100)
+	require.NoError(t, err)
+	return NewContainerCompiler(sb, compileCache)
 }
 
 func newContainerRunnerForTest(t *testing.T) *ContainerdRunner {
@@ -104,26 +116,10 @@ func newServiceIntegrationEnv(t *testing.T, timeout time.Duration) serviceIntegr
 	}
 }
 
-func writeTempInputFile(t *testing.T, content string) string {
-	t.Helper()
-
-	inputFile, err := os.CreateTemp("", "test-input-*.txt")
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = os.Remove(inputFile.Name()) })
-
-	_, err = inputFile.WriteString(content)
-	require.NoError(t, err)
-	require.NoError(t, inputFile.Close())
-
-	return inputFile.Name()
-}
-
 func compileProgram(t *testing.T, env serviceIntegrationEnv, req CompileRequest) CompileOutput {
 	t.Helper()
 
 	out, err := env.compiler.Compile(env.ctx, req)
 	require.NoError(t, err)
-	require.NotNil(t, out.Cleanup)
-	t.Cleanup(out.Cleanup)
 	return out
 }

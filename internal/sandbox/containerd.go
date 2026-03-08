@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"sync"
@@ -156,34 +157,43 @@ func (s *ContainerdSandbox) executeInContainer(
 	}()
 
 	containerID := generateContainerID()
+	specOpts := []oci.SpecOpts{
+		oci.WithImageConfig(image),
+		oci.WithProcessArgs(req.Command...),
+	}
 
-	mounts := make([]specs.Mount, 0, len(req.Mounts))
-	for _, m := range req.Mounts {
+	if req.MountDir != nil {
 		opts := []string{"rbind"}
-		if m.ReadOnly {
+		if req.MountDir.ReadOnly {
 			opts = append(opts, "ro")
 		}
-		mounts = append(mounts, specs.Mount{
-			Destination: m.ContainerPath,
+		specOpts = append(specOpts, oci.WithMounts([]specs.Mount{{
+			Destination: req.MountDir.ContainerPath,
 			Type:        "bind",
-			Source:      m.HostPath,
+			Source:      req.MountDir.HostPath,
 			Options:     opts,
-		})
+		}}))
+	}
+
+	cwd, hasCwd, err := resolveCwd(req)
+	if err != nil {
+		return ExecuteResult{}, err
+	}
+	if hasCwd {
+		specOpts = append(specOpts, oci.WithProcessCwd(cwd))
 	}
 
 	memoryLimitBytes := int64(req.Limits.MemoryMB) * bytesPerMiB
+	specOpts = append(specOpts,
+		oci.WithMemoryLimit(uint64(memoryLimitBytes)), //nolint:gosec // G115: value is validated
+		oci.WithMemorySwap(memoryLimitBytes),
+		sandboxSecurityOpts(),
+	)
 
 	container, err := client.NewContainer(ctx, containerID,
 		containerd.WithImage(image),
 		containerd.WithNewSnapshot(containerID+"-snap", image),
-		containerd.WithNewSpec(
-			oci.WithImageConfig(image),
-			oci.WithProcessArgs(req.Command...),
-			oci.WithMounts(mounts),
-			oci.WithMemoryLimit(uint64(memoryLimitBytes)), //nolint:gosec // G115: value is validated
-			oci.WithMemorySwap(memoryLimitBytes),
-			sandboxSecurityOpts(),
-		),
+		containerd.WithNewSpec(specOpts...),
 	)
 	if err != nil {
 		return ExecuteResult{}, fmt.Errorf("create container: %w", err)
@@ -222,6 +232,27 @@ func (s *ContainerdSandbox) executeInContainer(
 	succeeded = true
 	rollback()
 	return result, nil
+}
+
+func resolveCwd(req ExecuteRequest) (string, bool, error) {
+	if req.Cwd != nil {
+		if !filepath.IsAbs(*req.Cwd) {
+			return "", false, fmt.Errorf("cwd must be an absolute path: %q", *req.Cwd)
+		}
+		return *req.Cwd, true, nil
+	}
+
+	if req.MountDir != nil {
+		if req.MountDir.ContainerPath == "" {
+			return "", false, errors.New("mount dir container path is required")
+		}
+		if !filepath.IsAbs(req.MountDir.ContainerPath) {
+			return "", false, fmt.Errorf("mount dir container path must be absolute: %q", req.MountDir.ContainerPath)
+		}
+		return req.MountDir.ContainerPath, true, nil
+	}
+
+	return "", false, nil
 }
 
 func (s *ContainerdSandbox) watchExecution(

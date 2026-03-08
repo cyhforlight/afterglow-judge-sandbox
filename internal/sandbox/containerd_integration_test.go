@@ -149,69 +149,14 @@ func TestContainerdSandbox_Execute_NonZeroExit(t *testing.T) {
 	assert.Equal(t, VerdictRE, result.Verdict)
 }
 
-func TestContainerdSandbox_Execute_MultipleMounts(t *testing.T) {
-	requireSandboxIntegrationTest(t)
-
-	sb := newTestSandbox(t)
-	ctx := newSandboxTestContext(t, 10*time.Second)
-
-	tmpDir1 := t.TempDir()
-	tmpDir2 := t.TempDir()
-
-	// Create test files
-	err := os.WriteFile(filepath.Join(tmpDir1, "file1.txt"), []byte("content1"), 0o644)
-	require.NoError(t, err)
-	err = os.WriteFile(filepath.Join(tmpDir2, "file2.txt"), []byte("content2"), 0o644)
-	require.NoError(t, err)
-
-	// Python script to read both files
-	pythonCode := `
-with open('/dir1/file1.txt', 'r') as f1:
-    print(f1.read(), end='')
-with open('/dir2/file2.txt', 'r') as f2:
-    print(f2.read(), end='')
-`
-
-	req := ExecuteRequest{
-		ImageRef: testPythonImageRef,
-		Command:  []string{"python3", "-c", pythonCode},
-		Mounts: []Mount{
-			{
-				HostPath:      tmpDir1,
-				ContainerPath: "/dir1",
-				ReadOnly:      true,
-			},
-			{
-				HostPath:      tmpDir2,
-				ContainerPath: "/dir2",
-				ReadOnly:      true,
-			},
-		},
-		Limits: ResourceLimits{
-			CPUTimeMs:   1000,
-			WallTimeMs:  3000,
-			MemoryMB:    128,
-			OutputBytes: 1024,
-		},
-	}
-
-	result, err := sb.Execute(ctx, req)
-	require.NoError(t, err)
-
-	assert.Equal(t, 0, result.ExitCode)
-	assert.Equal(t, VerdictOK, result.Verdict)
-	assert.Contains(t, result.Stdout, "content1")
-	assert.Contains(t, result.Stdout, "content2")
-}
-
 func TestContainerdSandbox_Execute_MountedBinary(t *testing.T) {
 	requireSandboxIntegrationTest(t)
 
 	sb := newTestSandbox(t)
 	ctx := newSandboxTestContext(t, 10*time.Second)
 
-	// 挂载 testdata/test_runner 二进制
-	testRunnerPath := filepath.Join("..", "..", "testdata", "test_runner")
+	// 挂载 testdata/test_runner/test_runner 二进制
+	testRunnerPath := filepath.Join("..", "..", "testdata", "test_runner", "test_runner")
 	absPath, err := filepath.Abs(testRunnerPath)
 	require.NoError(t, err)
 
@@ -226,11 +171,11 @@ func TestContainerdSandbox_Execute_MountedBinary(t *testing.T) {
 	req := ExecuteRequest{
 		ImageRef: testStaticImageRef,
 		Command:  []string{"/sandbox/test_runner"},
-		Mounts: []Mount{{
+		MountDir: &Mount{
 			HostPath:      tmpDir,
 			ContainerPath: "/sandbox",
 			ReadOnly:      true,
-		}},
+		},
 		Limits: ResourceLimits{
 			CPUTimeMs:   1000,
 			WallTimeMs:  3000,
@@ -254,7 +199,7 @@ func TestContainerdSandbox_Execute_MountedBinaryReadFile(t *testing.T) {
 	ctx := newSandboxTestContext(t, 10*time.Second)
 
 	// 准备测试二进制和数据文件
-	testRunnerPath := filepath.Join("..", "..", "testdata", "test_runner")
+	testRunnerPath := filepath.Join("..", "..", "testdata", "test_runner", "test_runner")
 	absPath, err := filepath.Abs(testRunnerPath)
 	require.NoError(t, err)
 
@@ -273,11 +218,11 @@ func TestContainerdSandbox_Execute_MountedBinaryReadFile(t *testing.T) {
 	req := ExecuteRequest{
 		ImageRef: testStaticImageRef,
 		Command:  []string{"/sandbox/test_runner", "readfile", "/sandbox/input.txt"},
-		Mounts: []Mount{{
+		MountDir: &Mount{
 			HostPath:      tmpDir,
 			ContainerPath: "/sandbox",
 			ReadOnly:      true,
-		}},
+		},
 		Limits: ResourceLimits{
 			CPUTimeMs:   1000,
 			WallTimeMs:  3000,
@@ -335,11 +280,11 @@ print('done')
 	req := ExecuteRequest{
 		ImageRef: testPythonImageRef,
 		Command:  []string{"python3", "-c", pythonCode},
-		Mounts: []Mount{{
+		MountDir: &Mount{
 			HostPath:      tmpDir,
 			ContainerPath: "/output",
 			ReadOnly:      false,
-		}},
+		},
 		Limits: ResourceLimits{
 			CPUTimeMs:   1000,
 			WallTimeMs:  3000,

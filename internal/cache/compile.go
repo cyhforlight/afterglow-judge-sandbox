@@ -14,9 +14,10 @@ import (
 
 // CachedArtifact represents a cached compilation artifact.
 type CachedArtifact struct {
-	ArtifactPath string
+	Artifact     model.CompiledArtifact
 	CompileLog   string
 	Language     model.Language
+	artifactPath string
 }
 
 // CompileCache manages cached compilation artifacts with LRU eviction.
@@ -50,7 +51,7 @@ func NewCompileCache(cacheDir string, maxEntries int) (*CompileCache, error) {
 
 	cache, err := lru.NewWithEvict(maxEntries, func(_ string, value *CachedArtifact) {
 		// Eviction callback: delete disk file
-		_ = os.Remove(value.ArtifactPath)
+		_ = os.Remove(value.artifactPath)
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create LRU cache: %w", err)
@@ -70,32 +71,54 @@ func NewCompileCacheForTest(cacheDir string, maxEntries int) (*CompileCache, err
 
 // Get retrieves a cached artifact by key.
 func (c *CompileCache) Get(key string) (*CachedArtifact, bool) {
-	return c.cache.Get(key)
+	cached, ok := c.cache.Get(key)
+	if !ok {
+		return nil, false
+	}
+
+	data, err := os.ReadFile(cached.artifactPath)
+	if err != nil {
+		return nil, false
+	}
+
+	return &CachedArtifact{
+		Artifact: model.CompiledArtifact{
+			Name: cached.Artifact.Name,
+			Data: data,
+			Mode: cached.Artifact.Mode,
+		},
+		CompileLog: cached.CompileLog,
+		Language:   cached.Language,
+	}, true
 }
 
 // Put stores a compilation artifact in cache.
-func (c *CompileCache) Put(key string, artifactPath string, compileLog string, lang model.Language) error {
+func (c *CompileCache) Put(key string, artifact model.CompiledArtifact, compileLog string, lang model.Language) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Copy artifact to cache directory
 	cachedPath := filepath.Join(c.cacheDir, key)
-	data, err := os.ReadFile(artifactPath)
-	if err != nil {
-		return fmt.Errorf("read artifact: %w", err)
+
+	mode := artifact.Mode
+	if mode == 0 {
+		mode = 0o644
 	}
 
-	if err := os.WriteFile(cachedPath, data, 0644); err != nil {
+	if err := os.WriteFile(cachedPath, artifact.Data, mode); err != nil {
 		return fmt.Errorf("write cached artifact: %w", err)
 	}
 
-	artifact := &CachedArtifact{
-		ArtifactPath: cachedPath,
+	cached := &CachedArtifact{
+		Artifact: model.CompiledArtifact{
+			Name: artifact.Name,
+			Mode: mode,
+		},
 		CompileLog:   compileLog,
 		Language:     lang,
+		artifactPath: cachedPath,
 	}
 
-	c.cache.Add(key, artifact)
+	c.cache.Add(key, cached)
 	return nil
 }
 

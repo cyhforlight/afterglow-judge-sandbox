@@ -4,9 +4,9 @@ import (
 	"context"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"afterglow-judge-sandbox/internal/cache"
 	"afterglow-judge-sandbox/internal/model"
@@ -24,17 +24,13 @@ func TestHostCompiler_Compile_PythonSuccess(t *testing.T) {
 		SourceCode: "print(42)\n",
 	})
 	require.NoError(t, err)
-	require.NotNil(t, out.Cleanup)
-	defer out.Cleanup()
 
 	assert.True(t, out.Result.Succeeded)
 	assert.Equal(t, model.LanguagePython, out.RuntimeLanguage)
 	assert.Contains(t, out.Result.Log, "does not require compile")
-	assert.NotEmpty(t, out.ArtifactPath)
-
-	data, readErr := os.ReadFile(out.ArtifactPath)
-	require.NoError(t, readErr)
-	assert.Equal(t, "print(42)\n", string(data))
+	require.NotNil(t, out.Artifact)
+	assert.Equal(t, "solution.py", out.Artifact.Name)
+	assert.Equal(t, []byte("print(42)\n"), out.Artifact.Data)
 }
 
 func TestHostCompiler_Compile_UnknownLanguage(t *testing.T) {
@@ -45,11 +41,9 @@ func TestHostCompiler_Compile_UnknownLanguage(t *testing.T) {
 		SourceCode: "whatever",
 	})
 	require.NoError(t, err)
-	require.NotNil(t, out.Cleanup)
-	defer out.Cleanup()
 
 	assert.False(t, out.Result.Succeeded)
-	assert.Empty(t, out.ArtifactPath)
+	assert.Nil(t, out.Artifact)
 	assert.Contains(t, out.Result.Log, "unsupported language")
 }
 
@@ -62,11 +56,9 @@ func TestHostCompiler_Compile_CPPToolchainMissing(t *testing.T) {
 		SourceCode: "int main(){return 0;}\n",
 	})
 	require.NoError(t, err)
-	require.NotNil(t, out.Cleanup)
-	defer out.Cleanup()
 
 	assert.False(t, out.Result.Succeeded)
-	assert.Empty(t, out.ArtifactPath)
+	assert.Nil(t, out.Artifact)
 	assert.Contains(t, out.Result.Log, "g++ not found in PATH")
 }
 
@@ -83,11 +75,9 @@ func TestHostCompiler_Compile_JavaToolchainMissing(t *testing.T) {
 }`,
 	})
 	require.NoError(t, err)
-	require.NotNil(t, out.Cleanup)
-	defer out.Cleanup()
 
 	assert.False(t, out.Result.Succeeded)
-	assert.Empty(t, out.ArtifactPath)
+	assert.Nil(t, out.Artifact)
 	assert.True(t, strings.Contains(out.Result.Log, "javac not found") || strings.Contains(out.Result.Log, "jar not found"))
 }
 
@@ -102,31 +92,22 @@ func TestHostCompiler_Compile_CPPSyntaxError(t *testing.T) {
 		SourceCode: "int main( { return 0; }\n",
 	})
 	require.NoError(t, err)
-	require.NotNil(t, out.Cleanup)
-	defer out.Cleanup()
 
 	assert.False(t, out.Result.Succeeded)
-	assert.Empty(t, out.ArtifactPath)
+	assert.Nil(t, out.Artifact)
 	assert.NotEmpty(t, strings.TrimSpace(out.Result.Log))
 }
 
-func TestHostCompiler_CleanupRemovesWorkDir(t *testing.T) {
+func TestHostCompiler_ArtifactReturnedByValue(t *testing.T) {
 	compiler := NewHostCompiler()
 	out, err := compiler.Compile(context.Background(), CompileRequest{
 		Language:   model.LanguagePython,
 		SourceCode: "print(1)\n",
 	})
 	require.NoError(t, err)
-	require.NotNil(t, out.Cleanup)
-
-	workDir := filepath.Dir(out.ArtifactPath)
-	_, statErr := os.Stat(workDir)
-	require.NoError(t, statErr)
-
-	out.Cleanup()
-	_, statErr = os.Stat(workDir)
-	require.Error(t, statErr)
-	assert.True(t, os.IsNotExist(statErr))
+	require.True(t, out.Result.Succeeded)
+	require.NotNil(t, out.Artifact)
+	assert.Equal(t, []byte("print(1)\n"), out.Artifact.Data)
 }
 
 // TestHostCompiler_CPP_RealCompilation tests real C++ compilation with executable verification.
@@ -147,17 +128,12 @@ int main() {
 }`,
 	})
 	require.NoError(t, err)
-	require.NotNil(t, out.Cleanup)
-	defer out.Cleanup()
 
 	assert.True(t, out.Result.Succeeded, "compilation should succeed")
-	assert.NotEmpty(t, out.ArtifactPath)
+	require.NotNil(t, out.Artifact)
 	assert.Equal(t, model.LanguageCPP, out.RuntimeLanguage)
-
-	// Verify the binary exists and is executable
-	info, statErr := os.Stat(out.ArtifactPath)
-	require.NoError(t, statErr)
-	assert.NotZero(t, info.Mode()&0111, "binary should be executable")
+	assert.NotEmpty(t, out.Artifact.Data)
+	assert.NotZero(t, out.Artifact.Mode&0o111, "binary should be executable")
 }
 
 // TestHostCompiler_C_RealCompilation tests real C compilation.
@@ -176,16 +152,11 @@ int main() {
 }`,
 	})
 	require.NoError(t, err)
-	require.NotNil(t, out.Cleanup)
-	defer out.Cleanup()
 
 	assert.True(t, out.Result.Succeeded)
-	assert.NotEmpty(t, out.ArtifactPath)
+	require.NotNil(t, out.Artifact)
 	assert.Equal(t, model.LanguageC, out.RuntimeLanguage)
-
-	// Verify the binary exists
-	_, statErr := os.Stat(out.ArtifactPath)
-	require.NoError(t, statErr)
+	assert.NotEmpty(t, out.Artifact.Data)
 }
 
 // TestHostCompiler_Java_RealCompilation tests real Java compilation.
@@ -210,17 +181,12 @@ public class Main {
 }`,
 	})
 	require.NoError(t, err)
-	require.NotNil(t, out.Cleanup)
-	defer out.Cleanup()
 
 	assert.True(t, out.Result.Succeeded, "compilation should succeed")
-	assert.NotEmpty(t, out.ArtifactPath)
-	assert.Contains(t, out.ArtifactPath, ".jar", "artifact should be a JAR file")
+	require.NotNil(t, out.Artifact)
+	assert.Equal(t, "solution.jar", out.Artifact.Name)
 	assert.Equal(t, model.LanguageJava, out.RuntimeLanguage)
-
-	// Verify the JAR exists
-	_, statErr := os.Stat(out.ArtifactPath)
-	require.NoError(t, statErr)
+	assert.NotEmpty(t, out.Artifact.Data)
 }
 
 // TestHostCompiler_Python_MultilineCode tests Python with multiline code.
@@ -240,16 +206,10 @@ if __name__ == "__main__":
 		SourceCode: sourceCode,
 	})
 	require.NoError(t, err)
-	require.NotNil(t, out.Cleanup)
-	defer out.Cleanup()
 
 	assert.True(t, out.Result.Succeeded)
-	assert.NotEmpty(t, out.ArtifactPath)
-
-	// Verify the source code is correctly written
-	data, readErr := os.ReadFile(out.ArtifactPath)
-	require.NoError(t, readErr)
-	assert.Equal(t, sourceCode, string(data))
+	require.NotNil(t, out.Artifact)
+	assert.Equal(t, []byte(sourceCode), out.Artifact.Data)
 }
 
 // TestHostCompiler_CPP_CompileErrorDetails tests that compile errors include useful details.
@@ -264,11 +224,9 @@ func TestHostCompiler_CPP_CompileErrorDetails(t *testing.T) {
 		SourceCode: "int main() { undeclared_variable = 42; return 0; }\n",
 	})
 	require.NoError(t, err, "Compile should not return error, but set Succeeded=false")
-	require.NotNil(t, out.Cleanup)
-	defer out.Cleanup()
 
 	assert.False(t, out.Result.Succeeded)
-	assert.Empty(t, out.ArtifactPath)
+	assert.Nil(t, out.Artifact)
 	assert.NotEmpty(t, out.Result.Log)
 	// Verify the log contains useful error information
 	assert.Contains(t, out.Result.Log, "undeclared", "error log should mention undeclared variable")
@@ -277,8 +235,12 @@ func TestHostCompiler_CPP_CompileErrorDetails(t *testing.T) {
 // hasContainerd checks if containerd is available for testing.
 func hasContainerd(t *testing.T) bool {
 	t.Helper()
-	_, err := exec.LookPath("ctr")
-	return err == nil
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	sb := sandbox.NewContainerdSandbox("")
+	return sb.PreflightCheck(ctx) == nil
 }
 
 // TestContainerCompiler_RealCacheHit tests real cache hit with compilation.
@@ -289,13 +251,11 @@ func TestContainerCompiler_RealCacheHit(t *testing.T) {
 
 	sb := sandbox.NewContainerdSandbox("")
 
-	// Create a cache for this test
-	cacheDir := filepath.Join(os.TempDir(), "test-compile-cache")
+	cacheDir := t.TempDir()
 	compileCache, err := cache.NewCompileCacheForTest(cacheDir, 10)
 	require.NoError(t, err)
 
 	compiler := NewContainerCompiler(sb, compileCache)
-	require.NotNil(t, compiler.cache, "cache should be initialized")
 
 	req := CompileRequest{
 		Language:   model.LanguageC,
@@ -306,51 +266,34 @@ func TestContainerCompiler_RealCacheHit(t *testing.T) {
 	initialStats := compiler.cache.Stats()
 	initialEntries := initialStats.Entries
 
-	// First compilation (cache miss)
+	// First compilation (cache miss) — artifact stored in cache
 	out1, err := compiler.Compile(context.Background(), req)
 	require.NoError(t, err)
 	require.True(t, out1.Result.Succeeded)
-	require.NotEmpty(t, out1.ArtifactPath)
-	defer out1.Cleanup()
-
-	artifact1Path := out1.ArtifactPath
-	artifact1Data, err := os.ReadFile(artifact1Path)
-	require.NoError(t, err)
+	require.NotNil(t, out1.Artifact)
+	artifact1Data := append([]byte(nil), out1.Artifact.Data...)
 
 	// Verify cache now has one more entry
 	afterMissStats := compiler.cache.Stats()
 	assert.Equal(t, initialEntries+1, afterMissStats.Entries, "cache should have one new entry after miss")
 
-	// Second compilation (cache hit)
+	// Second compilation (cache hit) — returns same cache path
 	out2, err := compiler.Compile(context.Background(), req)
 	require.NoError(t, err)
 	require.True(t, out2.Result.Succeeded)
-	require.NotEmpty(t, out2.ArtifactPath)
-	defer out2.Cleanup()
+	require.NotNil(t, out2.Artifact)
 
 	// Verify cache entries unchanged (hit, not new entry)
 	afterHitStats := compiler.cache.Stats()
 	assert.Equal(t, afterMissStats.Entries, afterHitStats.Entries, "cache hit should not add new entry")
 
-	// Verify artifacts are in different locations (copied to separate workspaces)
-	assert.NotEqual(t, artifact1Path, out2.ArtifactPath, "cache hit should copy to new workspace")
-
-	// Verify artifact content is identical
-	artifact2Data, err := os.ReadFile(out2.ArtifactPath)
-	require.NoError(t, err)
-	assert.Equal(t, artifact1Data, artifact2Data, "cached artifact should have same content")
-
-	// Verify both cleanups work independently
-	out1.Cleanup()
-	_, err = os.Stat(artifact1Path)
-	assert.True(t, os.IsNotExist(err), "first workspace should be cleaned up")
-
-	_, err = os.Stat(out2.ArtifactPath)
-	assert.NoError(t, err, "second workspace should still exist")
+	assert.Equal(t, out1.Artifact.Name, out2.Artifact.Name, "cache hit should preserve artifact name")
+	assert.Equal(t, out1.Artifact.Mode, out2.Artifact.Mode, "cache hit should preserve artifact mode")
+	assert.Equal(t, artifact1Data, out2.Artifact.Data, "cached artifact should have same content")
 }
 
-// TestContainerCompiler_CacheEvictionDuringJudge tests that eviction doesn't break ongoing judge.
-func TestContainerCompiler_CacheEvictionDuringJudge(t *testing.T) {
+// TestContainerCompiler_CacheEvictionDoesNotBreakHeldArtifact verifies value semantics survive eviction.
+func TestContainerCompiler_CacheEvictionDoesNotBreakHeldArtifact(t *testing.T) {
 	if !hasContainerd(t) {
 		t.Skip("containerd not available")
 	}
@@ -366,7 +309,7 @@ func TestContainerCompiler_CacheEvictionDuringJudge(t *testing.T) {
 		cache:   smallCache,
 	}
 
-	// First compilation (miss) - program 1
+	// Compile program 1
 	req1 := CompileRequest{
 		Language:   model.LanguageC,
 		SourceCode: "int main() { return 1; }",
@@ -374,57 +317,39 @@ func TestContainerCompiler_CacheEvictionDuringJudge(t *testing.T) {
 	out1, err := compiler.Compile(context.Background(), req1)
 	require.NoError(t, err)
 	require.True(t, out1.Result.Succeeded)
-	defer out1.Cleanup()
+	require.NotNil(t, out1.Artifact)
+	heldArtifact := *out1.Artifact
 
-	// Second compilation (hit) - same program 1
-	out1Hit, err := compiler.Compile(context.Background(), req1)
-	require.NoError(t, err)
-	require.True(t, out1Hit.Result.Succeeded)
-
-	// Keep reference to cache hit artifact path
-	hitArtifactPath := out1Hit.ArtifactPath
-	hitArtifactData, err := os.ReadFile(hitArtifactPath)
-	require.NoError(t, err)
-
-	// Compile two more programs to trigger eviction of program 1 from cache
+	// Compile two more programs to trigger eviction of program 1
 	req2 := CompileRequest{
 		Language:   model.LanguageC,
 		SourceCode: "int main() { return 2; }",
 	}
-	out2, err := compiler.Compile(context.Background(), req2)
+	_, err = compiler.Compile(context.Background(), req2)
 	require.NoError(t, err)
-	defer out2.Cleanup()
 
 	req3 := CompileRequest{
 		Language:   model.LanguageC,
 		SourceCode: "int main() { return 3; }",
 	}
-	out3, err := compiler.Compile(context.Background(), req3)
+	_, err = compiler.Compile(context.Background(), req3)
 	require.NoError(t, err)
-	defer out3.Cleanup()
 
-	// Verify cache hit artifact still exists in its workspace (not affected by cache eviction)
-	data, err := os.ReadFile(hitArtifactPath)
-	require.NoError(t, err, "cache hit artifact should still exist despite cache eviction")
-	assert.Equal(t, hitArtifactData, data, "artifact content should be unchanged")
-
-	// Cleanup cache hit workspace
-	out1Hit.Cleanup()
-	_, err = os.Stat(hitArtifactPath)
-	assert.True(t, os.IsNotExist(err), "workspace should be cleaned up")
+	// Verify the first returned artifact is still usable after eviction.
+	assert.NotEmpty(t, heldArtifact.Data)
+	assert.Equal(t, "program", heldArtifact.Name)
 }
 
-// TestContainerCompiler_CacheFailureDoesNotBreakCompilation tests graceful degradation.
-func TestContainerCompiler_CacheFailureDoesNotBreakCompilation(t *testing.T) {
+// TestContainerCompiler_NilCacheStillCompiles tests that cache remains optional.
+func TestContainerCompiler_NilCacheStillCompiles(t *testing.T) {
 	if !hasContainerd(t) {
 		t.Skip("containerd not available")
 	}
 
-	// Create compiler with nil cache (simulates cache initialization failure)
 	sb := sandbox.NewContainerdSandbox("")
 	compiler := &ContainerCompiler{
 		sandbox: sb,
-		cache:   nil, // Cache unavailable
+		cache:   nil,
 	}
 
 	req := CompileRequest{
@@ -432,37 +357,27 @@ func TestContainerCompiler_CacheFailureDoesNotBreakCompilation(t *testing.T) {
 		SourceCode: "int main() { return 0; }",
 	}
 
-	// Compilation should succeed even without cache
 	out, err := compiler.Compile(context.Background(), req)
-	require.NoError(t, err, "compilation should succeed even when cache is unavailable")
-	require.True(t, out.Result.Succeeded, "compilation should succeed")
-	require.NotEmpty(t, out.ArtifactPath, "should have artifact path")
-
-	// Verify artifact exists
-	info, err := os.Stat(out.ArtifactPath)
-	require.NoError(t, err, "artifact should exist")
-	assert.NotZero(t, info.Size(), "artifact should not be empty")
-
-	// Get the workspace directory (parent of artifact)
-	workspaceDir := filepath.Dir(out.ArtifactPath)
-
-	// Cleanup should remove the workspace
-	out.Cleanup()
-	_, err = os.Stat(workspaceDir)
-	assert.True(t, os.IsNotExist(err), "workspace should be cleaned up after Cleanup()")
+	require.NoError(t, err)
+	require.True(t, out.Result.Succeeded)
+	require.NotNil(t, out.Artifact)
+	assert.NotEmpty(t, out.Artifact.Data)
 }
 
-// TestContainerCompiler_CacheFailureNoWorkspaceLeak verifies no workspace leak when cache unavailable.
-func TestContainerCompiler_CacheFailureNoWorkspaceLeak(t *testing.T) {
+// TestContainerCompiler_WorkspaceCleanedAfterCompile verifies workspace is cleaned up.
+func TestContainerCompiler_WorkspaceCleanedAfterCompile(t *testing.T) {
 	if !hasContainerd(t) {
 		t.Skip("containerd not available")
 	}
 
-	// Create compiler with nil cache
+	tmpCacheDir := t.TempDir()
+	testCache, err := cache.NewCompileCacheForTest(tmpCacheDir, 100)
+	require.NoError(t, err)
+
 	sb := sandbox.NewContainerdSandbox("")
 	compiler := &ContainerCompiler{
 		sandbox: sb,
-		cache:   nil,
+		cache:   testCache,
 	}
 
 	req := CompileRequest{
@@ -476,18 +391,20 @@ func TestContainerCompiler_CacheFailureNoWorkspaceLeak(t *testing.T) {
 	require.NoError(t, err)
 	beforeCount := countJudgeWorkspaces(beforeEntries)
 
-	// Compile and immediately cleanup
+	// Compile — workspace should be cleaned up after function returns
 	out, err := compiler.Compile(context.Background(), req)
 	require.NoError(t, err)
 	require.True(t, out.Result.Succeeded)
-	out.Cleanup()
+	require.NotNil(t, out.Artifact)
 
 	// Verify no workspace leak
 	afterEntries, err := os.ReadDir(tmpDir)
 	require.NoError(t, err)
 	afterCount := countJudgeWorkspaces(afterEntries)
 
-	assert.Equal(t, beforeCount, afterCount, "no workspace should leak after cleanup")
+	assert.Equal(t, beforeCount, afterCount, "no workspace should leak after compile")
+
+	assert.NotEmpty(t, out.Artifact.Data, "artifact should be returned by value")
 }
 
 // countJudgeWorkspaces counts sandbox workspace directories.
@@ -527,12 +444,9 @@ func TestContainerCompiler_CompilationFailure(t *testing.T) {
 	require.NoError(t, err, "Compile should not return error for compilation failure")
 	require.False(t, out.Result.Succeeded, "compilation should fail")
 	require.NotEmpty(t, out.Result.Log, "should have error log")
-	require.Empty(t, out.ArtifactPath, "failed compilation should have no artifact")
+	require.Nil(t, out.Artifact, "failed compilation should have no artifact")
 
 	// Verify no workspace leak (Cleanup should be safe to call)
-	if out.Cleanup != nil {
-		out.Cleanup()
-	}
 
 	// Verify cache is empty (failed compilations not cached)
 	stats := testCache.Stats()

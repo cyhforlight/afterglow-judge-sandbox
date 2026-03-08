@@ -4,6 +4,7 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -99,13 +100,20 @@ func (v Verdict) MarshalJSON() ([]byte, error) {
 	return json.Marshal(v.String())
 }
 
+// CompiledArtifact is a compiled program transferred by value between layers.
+type CompiledArtifact struct {
+	Name string
+	Data []byte
+	Mode os.FileMode
+}
+
 // ExecuteRequest contains parameters for code execution.
 type ExecuteRequest struct {
-	ExecutablePath string   `json:"executablePath"`
-	InputPath      string   `json:"inputPath"`
-	Language       Language `json:"language"`
-	TimeLimit      int      `json:"timeLimit"`   // milliseconds
-	MemoryLimit    int      `json:"memoryLimit"` // megabytes
+	Program     CompiledArtifact `json:"-"`
+	Input       string           `json:"input"`
+	Language    Language         `json:"language"`
+	TimeLimit   int              `json:"timeLimit"`   // milliseconds
+	MemoryLimit int              `json:"memoryLimit"` // megabytes
 }
 
 // ExecuteResult contains the execution outcome and resource usage.
