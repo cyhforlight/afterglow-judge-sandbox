@@ -16,7 +16,7 @@ func TestCompileCache_PutAndGet(t *testing.T) {
 	cache, err := NewCompileCacheForTest(tmpDir, 10)
 	require.NoError(t, err)
 
-	err = cache.Put("key1", createCompiledArtifact("program", "binary content", 0o755), "compile log", model.LanguageC)
+	err = cache.Put("key1", createCompiledArtifact("program", "binary content"), "compile log", model.LanguageC)
 	require.NoError(t, err)
 
 	// Get artifact from cache
@@ -43,11 +43,11 @@ func TestCompileCache_EvictionRemovesFile(t *testing.T) {
 	cache, err := NewCompileCacheForTest(tmpDir, 2) // max 2 entries
 	require.NoError(t, err)
 
-	err = cache.Put("key1", createCompiledArtifact("program1", "binary1", 0o755), "log1", model.LanguageC)
+	err = cache.Put("key1", createCompiledArtifact("program1", "binary1"), "log1", model.LanguageC)
 	require.NoError(t, err)
-	err = cache.Put("key2", createCompiledArtifact("program2", "binary2", 0o755), "log2", model.LanguageC)
+	err = cache.Put("key2", createCompiledArtifact("program2", "binary2"), "log2", model.LanguageC)
 	require.NoError(t, err)
-	err = cache.Put("key3", createCompiledArtifact("program3", "binary3", 0o755), "log3", model.LanguageC)
+	err = cache.Put("key3", createCompiledArtifact("program3", "binary3"), "log3", model.LanguageC)
 	require.NoError(t, err)
 
 	// Verify key1 was evicted
@@ -71,14 +71,14 @@ func TestCompileCache_LRUOrdering(t *testing.T) {
 	cache, err := NewCompileCacheForTest(tmpDir, 2)
 	require.NoError(t, err)
 
-	require.NoError(t, cache.Put("key1", createCompiledArtifact("program1", "binary1", 0o755), "log1", model.LanguageC))
-	require.NoError(t, cache.Put("key2", createCompiledArtifact("program2", "binary2", 0o755), "log2", model.LanguageC))
+	require.NoError(t, cache.Put("key1", createCompiledArtifact("program1", "binary1"), "log1", model.LanguageC))
+	require.NoError(t, cache.Put("key2", createCompiledArtifact("program2", "binary2"), "log2", model.LanguageC))
 
 	// Access key1 to make it recently used
 	cache.Get("key1")
 
 	// Add key3, should evict key2 (least recently used)
-	require.NoError(t, cache.Put("key3", createCompiledArtifact("program3", "binary3", 0o755), "log3", model.LanguageC))
+	require.NoError(t, cache.Put("key3", createCompiledArtifact("program3", "binary3"), "log3", model.LanguageC))
 
 	// Verify key2 was evicted, key1 and key3 remain
 	_, ok := cache.Get("key2")
@@ -97,7 +97,7 @@ func TestCompileCache_Stats(t *testing.T) {
 	stats := cache.Stats()
 	assert.Equal(t, 0, stats.Entries)
 
-	require.NoError(t, cache.Put("key1", createCompiledArtifact("program", "binary", 0o755), "log", model.LanguageC))
+	require.NoError(t, cache.Put("key1", createCompiledArtifact("program", "binary"), "log", model.LanguageC))
 
 	stats = cache.Stats()
 	assert.Equal(t, 1, stats.Entries)
@@ -133,10 +133,10 @@ func TestCompileCache_OrphanCleanup(t *testing.T) {
 	assert.Equal(t, 0, stats.Entries, "cache should start empty after cleanup")
 }
 
-func createCompiledArtifact(name, content string, mode os.FileMode) model.CompiledArtifact {
+func createCompiledArtifact(name, content string) model.CompiledArtifact {
 	return model.CompiledArtifact{
 		Name: name,
 		Data: []byte(content),
-		Mode: mode,
+		Mode: 0o755,
 	}
 }

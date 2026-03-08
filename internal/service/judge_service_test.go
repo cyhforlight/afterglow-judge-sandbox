@@ -22,6 +22,7 @@ func (c *fakeCompiler) Compile(_ context.Context, _ CompileRequest) (CompileOutp
 
 type fakeRunner struct {
 	preflightErr error
+	executeErr   error
 	result       model.ExecuteResult
 	results      []model.ExecuteResult
 	calls        int
@@ -31,16 +32,19 @@ func (r *fakeRunner) PreflightCheck(_ context.Context) error {
 	return r.preflightErr
 }
 
-func (r *fakeRunner) Execute(_ context.Context, _ model.ExecuteRequest) model.ExecuteResult {
+func (r *fakeRunner) Execute(_ context.Context, _ model.ExecuteRequest) (model.ExecuteResult, error) {
+	if r.executeErr != nil {
+		return model.ExecuteResult{}, r.executeErr
+	}
 	if len(r.results) == 0 {
-		return r.result
+		return r.result, nil
 	}
 	idx := r.calls
 	if idx >= len(r.results) {
 		idx = len(r.results) - 1
 	}
 	r.calls++
-	return r.results[idx]
+	return r.results[idx], nil
 }
 
 func testCompiledArtifact() *model.CompiledArtifact {

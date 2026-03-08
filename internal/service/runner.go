@@ -9,5 +9,5 @@ import (
 // Runner executes a program inside a sandboxed container.
 type Runner interface {
 	PreflightCheck(ctx context.Context) error
-	Execute(ctx context.Context, req model.ExecuteRequest) model.ExecuteResult
+	Execute(ctx context.Context, req model.ExecuteRequest) (model.ExecuteResult, error)
 }

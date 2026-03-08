@@ -129,13 +129,20 @@ func (s *JudgeEngine) runSingleCase(
 		}
 	}
 
-	runResult := s.runner.Execute(ctx, model.ExecuteRequest{
+	runResult, err := s.runner.Execute(ctx, model.ExecuteRequest{
 		Program:     *compileOut.Artifact,
 		Input:       testCase.InputText,
 		Language:    compileOut.RuntimeLanguage,
 		TimeLimit:   req.TimeLimit,
 		MemoryLimit: req.MemoryLimit,
 	})
+	if err != nil {
+		return model.JudgeCaseResult{
+			Name:      testCase.Name,
+			Verdict:   model.VerdictUKE,
+			ExtraInfo: fmt.Sprintf("infrastructure error: %v", err),
+		}
+	}
 
 	finalVerdict := runResult.Verdict
 	extraInfo := runResult.ExtraInfo

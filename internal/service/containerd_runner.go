@@ -3,6 +3,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -40,18 +41,18 @@ func (r *ContainerdRunner) PreflightCheck(ctx context.Context) error {
 }
 
 // Execute runs the given request and returns the execution result.
-func (r *ContainerdRunner) Execute(ctx context.Context, req model.ExecuteRequest) model.ExecuteResult {
+func (r *ContainerdRunner) Execute(ctx context.Context, req model.ExecuteRequest) (model.ExecuteResult, error) {
 	result, err := r.execute(ctx, req)
 	if err != nil {
 		r.log.ErrorContext(ctx, "execution failed", "error", err)
-		return buildInfraFailureResult(err)
+		return model.ExecuteResult{}, err
 	}
 	r.log.InfoContext(ctx, "execution complete",
 		"verdict", result.Verdict.String(),
 		"timeUsed", result.TimeUsed,
 		"memoryUsed", result.MemoryUsed,
 	)
-	return result
+	return result, nil
 }
 
 func (r *ContainerdRunner) execute(ctx context.Context, req model.ExecuteRequest) (model.ExecuteResult, error) {
@@ -60,7 +61,7 @@ func (r *ContainerdRunner) execute(ctx context.Context, req model.ExecuteRequest
 		return model.ExecuteResult{}, fmt.Errorf("no run profile for language %q", req.Language)
 	}
 	if len(req.Program.Data) == 0 {
-		return model.ExecuteResult{}, fmt.Errorf("program data is required")
+		return model.ExecuteResult{}, errors.New("program data is required")
 	}
 
 	ws, err := NewWorkspace()
@@ -132,13 +133,5 @@ func convertVerdict(v sandbox.Verdict) model.Verdict {
 		return model.VerdictRE
 	default:
 		return model.VerdictUKE
-	}
-}
-
-func buildInfraFailureResult(err error) model.ExecuteResult {
-	return model.ExecuteResult{
-		Verdict:   model.VerdictUKE,
-		ExitCode:  -1,
-		ExtraInfo: err.Error(),
 	}
 }
