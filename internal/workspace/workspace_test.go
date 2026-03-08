@@ -1,4 +1,4 @@
-package service
+package workspace
 
 import (
 	"os"
@@ -9,7 +9,7 @@ import (
 )
 
 func TestWorkspace_CreateAndCleanup(t *testing.T) {
-	ws, err := NewWorkspace()
+	ws, err := New()
 	require.NoError(t, err)
 	require.NotNil(t, ws)
 
@@ -30,7 +30,7 @@ func TestWorkspace_CreateAndCleanup(t *testing.T) {
 }
 
 func TestWorkspace_WriteAndReadFile(t *testing.T) {
-	ws, err := NewWorkspace()
+	ws, err := New()
 	require.NoError(t, err)
 	defer func() { _ = ws.Cleanup() }()
 
@@ -44,7 +44,7 @@ func TestWorkspace_WriteAndReadFile(t *testing.T) {
 }
 
 func TestWorkspace_ReadNonExistentFile(t *testing.T) {
-	ws, err := NewWorkspace()
+	ws, err := New()
 	require.NoError(t, err)
 	defer func() { _ = ws.Cleanup() }()
 

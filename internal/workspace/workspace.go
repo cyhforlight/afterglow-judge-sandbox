@@ -1,4 +1,5 @@
-package service
+// Package workspace manages temporary directories for compilation and execution.
+package workspace
 
 import (
 	"fmt"
@@ -11,8 +12,8 @@ type Workspace struct {
 	dir string
 }
 
-// NewWorkspace creates a new temporary workspace directory.
-func NewWorkspace() (*Workspace, error) {
+// New creates a new temporary workspace directory.
+func New() (*Workspace, error) {
 	dir, err := os.MkdirTemp("", "sandbox-workspace-*")
 	if err != nil {
 		return nil, fmt.Errorf("create workspace: %w", err)

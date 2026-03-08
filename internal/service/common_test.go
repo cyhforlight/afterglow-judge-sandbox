@@ -16,8 +16,8 @@ import (
 
 type serviceIntegrationEnv struct {
 	ctx      context.Context
-	compiler *ContainerCompiler
-	runner   *ContainerdRunner
+	compiler Compiler
+	runner   Runner
 }
 
 var (
@@ -91,19 +91,19 @@ func newIntegrationContext(t *testing.T, timeout time.Duration) context.Context 
 	return ctx
 }
 
-func newContainerCompilerForTest(t *testing.T) *ContainerCompiler {
+func newCompilerForTest(t *testing.T) Compiler {
 	t.Helper()
 	sb := sandbox.NewContainerdSandbox("", "")
 	cacheDir := t.TempDir()
 	compileCache, err := cache.NewCompileCache(cacheDir, 100)
 	require.NoError(t, err)
-	return NewContainerCompiler(sb, compileCache)
+	return NewCompiler(sb, compileCache)
 }
 
-func newContainerRunnerForTest(t *testing.T) *ContainerdRunner {
+func newRunnerForTest(t *testing.T) Runner {
 	t.Helper()
 	sb := sandbox.NewContainerdSandbox("", "")
-	return NewContainerdRunner(sb)
+	return NewRunner(sb)
 }
 
 func newServiceIntegrationEnv(t *testing.T, timeout time.Duration) serviceIntegrationEnv {
@@ -111,8 +111,8 @@ func newServiceIntegrationEnv(t *testing.T, timeout time.Duration) serviceIntegr
 
 	return serviceIntegrationEnv{
 		ctx:      newIntegrationContext(t, timeout),
-		compiler: newContainerCompilerForTest(t),
-		runner:   newContainerRunnerForTest(t),
+		compiler: newCompilerForTest(t),
+		runner:   newRunnerForTest(t),
 	}
 }
 

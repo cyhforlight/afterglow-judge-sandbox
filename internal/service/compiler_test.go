@@ -36,7 +36,7 @@ func TestContainerCompiler_RealCacheHit(t *testing.T) {
 	compileCache, err := cache.NewCompileCache(cacheDir, 10)
 	require.NoError(t, err)
 
-	compiler := NewContainerCompiler(sb, compileCache)
+	compiler := NewCompiler(sb, compileCache)
 
 	req := CompileRequest{
 		Language:   model.LanguageC,
@@ -44,7 +44,7 @@ func TestContainerCompiler_RealCacheHit(t *testing.T) {
 	}
 
 	// Verify cache starts empty
-	initialStats := compiler.cache.Stats()
+	initialStats := compileCache.Stats()
 	initialEntries := initialStats.Entries
 
 	// First compilation (cache miss) — artifact stored in cache
@@ -55,7 +55,7 @@ func TestContainerCompiler_RealCacheHit(t *testing.T) {
 	artifact1Data := append([]byte(nil), out1.Artifact.Data...)
 
 	// Verify cache now has one more entry
-	afterMissStats := compiler.cache.Stats()
+	afterMissStats := compileCache.Stats()
 	assert.Equal(t, initialEntries+1, afterMissStats.Entries, "cache should have one new entry after miss")
 
 	// Second compilation (cache hit) — returns same cache path
@@ -65,7 +65,7 @@ func TestContainerCompiler_RealCacheHit(t *testing.T) {
 	require.NotNil(t, out2.Artifact)
 
 	// Verify cache entries unchanged (hit, not new entry)
-	afterHitStats := compiler.cache.Stats()
+	afterHitStats := compileCache.Stats()
 	assert.Equal(t, afterMissStats.Entries, afterHitStats.Entries, "cache hit should not add new entry")
 
 	assert.Equal(t, out1.Artifact.Name, out2.Artifact.Name, "cache hit should preserve artifact name")
@@ -85,10 +85,7 @@ func TestContainerCompiler_CacheEvictionDoesNotBreakHeldArtifact(t *testing.T) {
 	require.NoError(t, err)
 
 	sb := sandbox.NewContainerdSandbox("", "")
-	compiler := &ContainerCompiler{
-		sandbox: sb,
-		cache:   smallCache,
-	}
+	compiler := NewCompiler(sb, smallCache)
 
 	// Compile program 1
 	req1 := CompileRequest{
@@ -128,10 +125,7 @@ func TestContainerCompiler_NilCacheStillCompiles(t *testing.T) {
 	}
 
 	sb := sandbox.NewContainerdSandbox("", "")
-	compiler := &ContainerCompiler{
-		sandbox: sb,
-		cache:   nil,
-	}
+	compiler := NewCompiler(sb, nil)
 
 	req := CompileRequest{
 		Language:   model.LanguageC,
@@ -156,10 +150,7 @@ func TestContainerCompiler_WorkspaceCleanedAfterCompile(t *testing.T) {
 	require.NoError(t, err)
 
 	sb := sandbox.NewContainerdSandbox("", "")
-	compiler := &ContainerCompiler{
-		sandbox: sb,
-		cache:   testCache,
-	}
+	compiler := NewCompiler(sb, testCache)
 
 	req := CompileRequest{
 		Language:   model.LanguageC,
@@ -211,10 +202,7 @@ func TestContainerCompiler_CompilationFailure(t *testing.T) {
 	require.NoError(t, err)
 
 	sb := sandbox.NewContainerdSandbox("", "")
-	compiler := &ContainerCompiler{
-		sandbox: sb,
-		cache:   testCache,
-	}
+	compiler := NewCompiler(sb, testCache)
 
 	req := CompileRequest{
 		Language:   model.LanguageC,

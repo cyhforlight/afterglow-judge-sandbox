@@ -1,4 +1,4 @@
-package sandbox
+package service
 
 import (
 	"fmt"
@@ -8,6 +8,8 @@ import (
 )
 
 // LanguageProfile defines compilation and execution configuration for a language.
+// This encapsulates language-specific build commands and runtime parameters,
+// fulfilling the role of "Business Logic Layer 2 (Task Encapsulation)" as defined in PRD 3.3.
 type LanguageProfile struct {
 	Compile CompileConfig
 	Run     RunConfig
@@ -35,20 +37,20 @@ type RunConfig struct {
 func ProfileForLanguage(lang model.Language) (LanguageProfile, error) {
 	switch lang {
 	case model.LanguageC:
-		return CProfile(), nil
+		return cProfile(), nil
 	case model.LanguageCPP:
-		return CPPProfile(), nil
+		return cppProfile(), nil
 	case model.LanguageJava:
-		return JavaProfile(), nil
+		return javaProfile(), nil
 	case model.LanguagePython:
-		return PythonProfile(), nil
+		return pythonProfile(), nil
 	default:
 		return LanguageProfile{}, fmt.Errorf("unsupported language: %v", lang)
 	}
 }
 
-// CProfile returns the profile for C language.
-func CProfile() LanguageProfile {
+// cProfile returns the profile for C language.
+func cProfile() LanguageProfile {
 	return LanguageProfile{
 		Compile: CompileConfig{
 			ImageRef:     "docker.io/library/gcc:12-bookworm",
@@ -74,8 +76,8 @@ func CProfile() LanguageProfile {
 	}
 }
 
-// CPPProfile returns the profile for C++ language.
-func CPPProfile() LanguageProfile {
+// cppProfile returns the profile for C++ language.
+func cppProfile() LanguageProfile {
 	return LanguageProfile{
 		Compile: CompileConfig{
 			ImageRef:     "docker.io/library/gcc:12-bookworm",
@@ -101,8 +103,8 @@ func CPPProfile() LanguageProfile {
 	}
 }
 
-// JavaProfile returns the profile for Java language.
-func JavaProfile() LanguageProfile {
+// javaProfile returns the profile for Java language.
+func javaProfile() LanguageProfile {
 	return LanguageProfile{
 		Compile: CompileConfig{
 			ImageRef:     "docker.io/library/eclipse-temurin:21-jdk-jammy",
@@ -126,9 +128,9 @@ func JavaProfile() LanguageProfile {
 	}
 }
 
-// PythonProfile returns the profile for Python language.
+// pythonProfile returns the profile for Python language.
 // Python compiles to bytecode (.pyc) to catch syntax errors early.
-func PythonProfile() LanguageProfile {
+func pythonProfile() LanguageProfile {
 	return LanguageProfile{
 		Compile: CompileConfig{
 			ImageRef:     "docker.io/library/python:3.11-slim-bookworm",

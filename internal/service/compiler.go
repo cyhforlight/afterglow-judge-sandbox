@@ -11,6 +11,7 @@ import (
 	"afterglow-judge-sandbox/internal/cache"
 	"afterglow-judge-sandbox/internal/model"
 	"afterglow-judge-sandbox/internal/sandbox"
+	"afterglow-judge-sandbox/internal/workspace"
 )
 
 // CompileRequest contains source data for compilation.
@@ -31,31 +32,34 @@ type Compiler interface {
 	Compile(ctx context.Context, req CompileRequest) (CompileOutput, error)
 }
 
-// ContainerCompiler compiles user source code inside containers.
-type ContainerCompiler struct {
+// compiler compiles user source code inside containers.
+type compiler struct {
 	sandbox sandbox.Sandbox
 	cache   *cache.CompileCache
 }
 
-// NewContainerCompiler creates a container-based compiler.
-func NewContainerCompiler(sb sandbox.Sandbox, compileCache *cache.CompileCache) *ContainerCompiler {
-	return &ContainerCompiler{
+// NewCompiler creates a compiler.
+func NewCompiler(sb sandbox.Sandbox, compileCache *cache.CompileCache) Compiler {
+	return &compiler{
 		sandbox: sb,
 		cache:   compileCache,
 	}
 }
 
 // Compile compiles source code in an isolated container.
-func (c *ContainerCompiler) Compile(ctx context.Context, req CompileRequest) (CompileOutput, error) {
+func (c *compiler) Compile(ctx context.Context, req CompileRequest) (CompileOutput, error) {
 	var out CompileOutput
 
-	profile, err := sandbox.ProfileForLanguage(req.Language)
+	profile, err := ProfileForLanguage(req.Language)
 	if err != nil {
 		return out, fmt.Errorf("get language profile: %w", err)
 	}
 
 	out.RuntimeLanguage = req.Language
-	cacheKey := cache.CompileKey(req.SourceCode, req.Language, profile)
+	cacheKey := cache.CompileKey(req.SourceCode, req.Language, cache.CompileProfile{
+		ImageRef:     profile.Compile.ImageRef,
+		BuildCommand: profile.Compile.BuildCommand("/work", profile.Compile.SourceFiles),
+	})
 
 	// 1. Try to get from cache
 	if c.cache != nil {
@@ -100,7 +104,7 @@ func (c *ContainerCompiler) Compile(ctx context.Context, req CompileRequest) (Co
 
 // tryGetFromCache attempts to retrieve a cached artifact.
 // Returns (output, true) on success, (empty, false) on cache miss or error.
-func (c *ContainerCompiler) tryGetFromCache(
+func (c *compiler) tryGetFromCache(
 	ctx context.Context,
 	cacheKey string,
 ) (CompileOutput, bool) {
@@ -119,15 +123,15 @@ func (c *ContainerCompiler) tryGetFromCache(
 }
 
 //nolint:funlen // Compilation requires setup, execution, and artifact handling
-func (c *ContainerCompiler) compileInContainer(
+func (c *compiler) compileInContainer(
 	ctx context.Context,
 	req CompileRequest,
-	profile sandbox.LanguageProfile,
+	profile LanguageProfile,
 ) (CompileOutput, error) {
 	var out CompileOutput
 	out.RuntimeLanguage = req.Language
 
-	ws, err := NewWorkspace()
+	ws, err := workspace.New()
 	if err != nil {
 		return out, fmt.Errorf("create workspace: %w", err)
 	}

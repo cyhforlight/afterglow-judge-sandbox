@@ -34,8 +34,8 @@ func newE2EHandler(t *testing.T) *Handler {
 	cacheDir := t.TempDir()
 	compileCache, err := cache.NewCompileCache(cacheDir, 100)
 	require.NoError(t, err)
-	compiler := service.NewContainerCompiler(sb, compileCache)
-	runner := service.NewContainerdRunner(sb)
+	compiler := service.NewCompiler(sb, compileCache)
+	runner := service.NewRunner(sb)
 	judge := service.NewJudgeEngine(runner, compiler)
 
 	ctx := context.Background()

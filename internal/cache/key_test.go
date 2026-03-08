@@ -6,11 +6,13 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"afterglow-judge-sandbox/internal/model"
-	"afterglow-judge-sandbox/internal/sandbox"
 )
 
 func TestCompileKey_DifferentSourceCode(t *testing.T) {
-	profile := sandbox.CProfile()
+	profile := CompileProfile{
+		ImageRef:     "docker.io/library/gcc:12-bookworm",
+		BuildCommand: []string{"gcc", "-O2", "-o", "/work/program", "/work/main.c"},
+	}
 
 	key1 := CompileKey("int main() { return 0; }", model.LanguageC, profile)
 	key2 := CompileKey("int main() { return 1; }", model.LanguageC, profile)
@@ -22,15 +24,27 @@ func TestCompileKey_DifferentSourceCode(t *testing.T) {
 func TestCompileKey_DifferentLanguage(t *testing.T) {
 	sourceCode := "int main() { return 0; }"
 
-	keyC := CompileKey(sourceCode, model.LanguageC, sandbox.CProfile())
-	keyCPP := CompileKey(sourceCode, model.LanguageCPP, sandbox.CPPProfile())
+	profileC := CompileProfile{
+		ImageRef:     "docker.io/library/gcc:12-bookworm",
+		BuildCommand: []string{"gcc", "-O2", "-o", "/work/program", "/work/main.c"},
+	}
+	profileCPP := CompileProfile{
+		ImageRef:     "docker.io/library/gcc:12-bookworm",
+		BuildCommand: []string{"g++", "-std=c++20", "-O2", "-o", "/work/program", "/work/main.cpp"},
+	}
+
+	keyC := CompileKey(sourceCode, model.LanguageC, profileC)
+	keyCPP := CompileKey(sourceCode, model.LanguageCPP, profileCPP)
 
 	assert.NotEqual(t, keyC, keyCPP, "different languages should produce different keys")
 }
 
 func TestCompileKey_SameInputProducesSameKey(t *testing.T) {
 	sourceCode := "int main() { return 42; }"
-	profile := sandbox.CProfile()
+	profile := CompileProfile{
+		ImageRef:     "docker.io/library/gcc:12-bookworm",
+		BuildCommand: []string{"gcc", "-O2", "-o", "/work/program", "/work/main.c"},
+	}
 
 	key1 := CompileKey(sourceCode, model.LanguageC, profile)
 	key2 := CompileKey(sourceCode, model.LanguageC, profile)
@@ -42,8 +56,17 @@ func TestCompileKey_DifferentCompilerFlags(t *testing.T) {
 	sourceCode := "int main() { return 0; }"
 
 	// C and C++ use different compiler flags (-std=c++20)
-	keyC := CompileKey(sourceCode, model.LanguageC, sandbox.CProfile())
-	keyCPP := CompileKey(sourceCode, model.LanguageCPP, sandbox.CPPProfile())
+	profileC := CompileProfile{
+		ImageRef:     "docker.io/library/gcc:12-bookworm",
+		BuildCommand: []string{"gcc", "-O2", "-o", "/work/program", "/work/main.c"},
+	}
+	profileCPP := CompileProfile{
+		ImageRef:     "docker.io/library/gcc:12-bookworm",
+		BuildCommand: []string{"g++", "-std=c++20", "-O2", "-o", "/work/program", "/work/main.cpp"},
+	}
+
+	keyC := CompileKey(sourceCode, model.LanguageC, profileC)
+	keyCPP := CompileKey(sourceCode, model.LanguageCPP, profileCPP)
 
 	assert.NotEqual(t, keyC, keyCPP, "different compiler flags should produce different keys")
 }
