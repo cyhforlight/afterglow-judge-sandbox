@@ -10,9 +10,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"afterglow-judge-sandbox/internal/concurrency"
 	"afterglow-judge-sandbox/internal/config"
-	"afterglow-judge-sandbox/internal/model"
 	"afterglow-judge-sandbox/internal/sandbox"
 	"afterglow-judge-sandbox/internal/service"
 	"afterglow-judge-sandbox/internal/storage"
@@ -23,10 +21,7 @@ func main() {
 	cfg := config.Load()
 	logger := setupLogger(cfg.LogLevel)
 
-	logger.Info("starting sandbox server",
-		"addr", cfg.Addr(),
-		"max_concurrent", cfg.MaxConcurrentExecutions,
-	)
+	logger.Info("starting sandbox server", "addr", cfg.Addr())
 
 	judgeService, err := initializeComponents(cfg)
 	if err != nil {
@@ -53,8 +48,6 @@ func setupLogger(logLevel string) *slog.Logger {
 }
 
 func initializeComponents(cfg *config.Config) (service.JudgeService, error) {
-	limiter := concurrency.NewExecutionLimiter(int64(cfg.MaxConcurrentExecutions))
-
 	// 1. Create shared Sandbox instance
 	sb := sandbox.NewContainerdSandbox(cfg.ContainerdSocket, cfg.ContainerdNamespace)
 
@@ -69,12 +62,7 @@ func initializeComponents(cfg *config.Config) (service.JudgeService, error) {
 	// 3. Inject dependencies into Runner and Compiler
 	runner := service.NewRunner(sb)
 	compiler := service.NewCompiler(sb, cacheStorage)
-	baseJudge := service.NewJudgeEngine(runner, compiler)
-
-	judge := &limitedJudgeService{
-		judge:   baseJudge,
-		limiter: limiter,
-	}
+	judge := service.NewJudgeEngine(runner, compiler)
 
 	ctx := context.Background()
 	if err := judge.PreflightCheck(ctx); err != nil {
@@ -111,34 +99,4 @@ func runServer(server *httptransport.Server, cfg *config.Config, logger *slog.Lo
 	case err := <-errChan:
 		return err
 	}
-}
-
-type limitedJudgeService struct {
-	judge   service.JudgeService
-	limiter *concurrency.ExecutionLimiter
-}
-
-func (s *limitedJudgeService) PreflightCheck(ctx context.Context) error {
-	return s.judge.PreflightCheck(ctx)
-}
-
-func (s *limitedJudgeService) Judge(ctx context.Context, req model.JudgeRequest) model.JudgeResult {
-	var result model.JudgeResult
-
-	err := s.limiter.WithLimit(ctx, func() error {
-		result = s.judge.Judge(ctx, req)
-		return nil
-	})
-	if err != nil {
-		return model.JudgeResult{
-			Verdict: model.VerdictUKE,
-			Compile: model.CompileResult{
-				Succeeded: false,
-				Log:       err.Error(),
-			},
-			TotalCount: len(req.TestCases),
-		}
-	}
-
-	return result
 }

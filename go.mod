@@ -10,7 +10,6 @@ require (
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/opencontainers/runtime-spec v1.3.0
 	github.com/stretchr/testify v1.11.1
-	golang.org/x/sync v0.19.0
 )
 
 require (
@@ -53,6 +52,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.37.0 // indirect
 	go.opentelemetry.io/otel/trace v1.37.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
+	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250804133106-a7a43d27e69b // indirect
