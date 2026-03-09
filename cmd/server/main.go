@@ -66,13 +66,13 @@ func initializeComponents(cfg *config.Config) (service.JudgeService, error) {
 	}
 
 	// 4. Create base compiler and runner primitives.
-	baseCompiler := service.NewCompiler(sb, cacheStorage)
+	baseCompiler := service.NewCompiler(sb)
 	baseRunner := service.NewRunner(sb)
 
 	// 5. Create semantic-layer services.
 	userCodeCompiler := service.NewUserCodeCompiler(baseCompiler)
 	userCodeRunner := service.NewUserCodeRunner(baseRunner)
-	checkerCompiler := service.NewCheckerCompiler(baseCompiler)
+	checkerCompiler := service.NewCheckerCompiler(service.NewCachedCompiler(baseCompiler, cacheStorage))
 	checkerRunner := service.NewCheckerRunner(baseRunner)
 	checkerPolicy, err := service.NewCheckerPolicy(cfg.DefaultChecker, cfg.AllowedCheckers)
 	if err != nil {

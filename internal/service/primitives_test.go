@@ -53,7 +53,7 @@ func TestCompiler_LoadsArtifactFromWorkspace(t *testing.T) {
 		},
 	}
 
-	compiler := NewCompiler(sb, nil)
+	compiler := NewCompiler(sb)
 	out, err := compiler.Compile(context.Background(), CompileRequest{
 		Files: []CompileFile{{
 			Name:    "main.c",
@@ -77,38 +77,6 @@ func TestCompiler_LoadsArtifactFromWorkspace(t *testing.T) {
 	require.NotNil(t, out.Artifact)
 	assert.Equal(t, "program", out.Artifact.Name)
 	assert.Equal(t, []byte("binary"), out.Artifact.Data)
-}
-
-func TestCompileKey_ChangesWithFiles(t *testing.T) {
-	base := CompileRequest{
-		Files: []CompileFile{{
-			Name:    "main.c",
-			Content: []byte("int main() { return 0; }"),
-			Mode:    0644,
-		}},
-		ImageRef:     "compiler-image",
-		Command:      []string{"gcc", "-o", "/work/program", "/work/main.c"},
-		ArtifactName: "program",
-		ArtifactMode: 0o755,
-		ArtifactPath: "program",
-	}
-
-	changedContent := base
-	changedContent.Files = []CompileFile{{
-		Name:    "main.c",
-		Content: []byte("int main() { return 1; }"),
-		Mode:    0644,
-	}}
-
-	changedName := base
-	changedName.Files = []CompileFile{{
-		Name:    "alt.c",
-		Content: []byte("int main() { return 0; }"),
-		Mode:    0644,
-	}}
-
-	assert.NotEqual(t, compileKey(base), compileKey(changedContent))
-	assert.NotEqual(t, compileKey(base), compileKey(changedName))
 }
 
 func TestRunner_WritesFilesAndReturnsRawResult(t *testing.T) {

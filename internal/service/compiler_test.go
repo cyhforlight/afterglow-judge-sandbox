@@ -36,7 +36,7 @@ func TestContainerCompiler_RealCacheHit(t *testing.T) {
 	cacheStorage, err := storage.NewCacheStorage(cacheDir, 10)
 	require.NoError(t, err)
 
-	compiler := NewUserCodeCompiler(NewCompiler(sb, cacheStorage))
+	compiler := NewUserCodeCompiler(NewCachedCompiler(NewCompiler(sb), cacheStorage))
 
 	req := UserCodeCompileRequest{
 		Language:   model.LanguageC,
@@ -85,7 +85,7 @@ func TestContainerCompiler_CacheEvictionDoesNotBreakHeldArtifact(t *testing.T) {
 	require.NoError(t, err)
 
 	sb := sandbox.NewContainerdSandbox("", "")
-	compiler := NewUserCodeCompiler(NewCompiler(sb, smallCache))
+	compiler := NewUserCodeCompiler(NewCachedCompiler(NewCompiler(sb), smallCache))
 
 	// Compile program 1
 	req1 := UserCodeCompileRequest{
@@ -125,7 +125,7 @@ func TestContainerCompiler_NilCacheStillCompiles(t *testing.T) {
 	}
 
 	sb := sandbox.NewContainerdSandbox("", "")
-	compiler := NewUserCodeCompiler(NewCompiler(sb, nil))
+	compiler := NewUserCodeCompiler(NewCompiler(sb))
 
 	req := UserCodeCompileRequest{
 		Language:   model.LanguageC,
@@ -150,7 +150,7 @@ func TestContainerCompiler_WorkspaceCleanedAfterCompile(t *testing.T) {
 	require.NoError(t, err)
 
 	sb := sandbox.NewContainerdSandbox("", "")
-	compiler := NewUserCodeCompiler(NewCompiler(sb, testCache))
+	compiler := NewUserCodeCompiler(NewCachedCompiler(NewCompiler(sb), testCache))
 
 	req := UserCodeCompileRequest{
 		Language:   model.LanguageC,
@@ -202,7 +202,7 @@ func TestContainerCompiler_CompilationFailure(t *testing.T) {
 	require.NoError(t, err)
 
 	sb := sandbox.NewContainerdSandbox("", "")
-	compiler := NewUserCodeCompiler(NewCompiler(sb, testCache))
+	compiler := NewUserCodeCompiler(NewCachedCompiler(NewCompiler(sb), testCache))
 
 	req := UserCodeCompileRequest{
 		Language:   model.LanguageC,

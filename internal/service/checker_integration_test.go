@@ -37,7 +37,7 @@ func newCheckerCompilerForTest(t *testing.T) CheckerCompiler {
 	cacheStorage, err := storage.NewCacheStorage(cacheDir, 100)
 	require.NoError(t, err)
 
-	return NewCheckerCompiler(NewCompiler(sb, cacheStorage))
+	return NewCheckerCompiler(NewCachedCompiler(NewCompiler(sb), cacheStorage))
 }
 
 func newCheckerRunnerForTest(t *testing.T) CheckerRunner {

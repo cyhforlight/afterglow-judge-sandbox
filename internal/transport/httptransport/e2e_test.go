@@ -57,11 +57,11 @@ func newE2EHandler(t *testing.T) *Handler {
 	cacheStorage, err := storage.NewCacheStorage(cacheDir, 100)
 	require.NoError(t, err)
 
-	baseCompiler := service.NewCompiler(sb, cacheStorage)
+	baseCompiler := service.NewCompiler(sb)
 	baseRunner := service.NewRunner(sb)
 	compiler := service.NewUserCodeCompiler(baseCompiler)
 	runner := service.NewUserCodeRunner(baseRunner)
-	checkerCompiler := service.NewCheckerCompiler(baseCompiler)
+	checkerCompiler := service.NewCheckerCompiler(service.NewCachedCompiler(baseCompiler, cacheStorage))
 	checkerRunner := service.NewCheckerRunner(baseRunner)
 	checkerPolicy, err := service.NewCheckerPolicy("default", service.BuiltinCheckerNames())
 	require.NoError(t, err)

@@ -2,18 +2,14 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"afterglow-judge-sandbox/internal/model"
 	"afterglow-judge-sandbox/internal/sandbox"
-	"afterglow-judge-sandbox/internal/storage"
 	"afterglow-judge-sandbox/internal/workspace"
 )
 
@@ -55,32 +51,14 @@ type Compiler interface {
 // compiler compiles files inside containers.
 type compiler struct {
 	sandbox sandbox.Sandbox
-	cache   storage.Storage
 }
 
-// NewCompiler creates a generic compiler primitive.
-func NewCompiler(sb sandbox.Sandbox, cacheStorage storage.Storage) Compiler {
+// NewCompiler creates a generic compiler primitive without caching.
+// Use NewCachedCompiler to add caching capability.
+func NewCompiler(sb sandbox.Sandbox) Compiler {
 	return &compiler{
 		sandbox: sb,
-		cache:   cacheStorage,
 	}
-}
-
-func compileKey(req CompileRequest) string {
-	h := sha256.New()
-	h.Write([]byte(req.ImageRef))
-	h.Write([]byte(req.ArtifactName))
-	h.Write([]byte(req.ArtifactPath))
-	h.Write([]byte(req.ArtifactMode.String()))
-	h.Write([]byte(strings.Join(req.Command, "\x00")))
-
-	for _, file := range req.Files {
-		h.Write([]byte(file.Name))
-		h.Write([]byte(file.Mode.String()))
-		h.Write(file.Content)
-	}
-
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 // Compile compiles files in an isolated container.
@@ -89,22 +67,6 @@ func (c *compiler) Compile(ctx context.Context, req CompileRequest) (CompileOutp
 
 	if err := validateCompileRequest(req); err != nil {
 		return out, err
-	}
-
-	cacheKey := compileKey(req)
-	if c.cache != nil {
-		if data, err := c.cache.Get(ctx, cacheKey); err == nil {
-			slog.InfoContext(ctx, "compilation cache hit", "key", cacheKey[:16])
-			return CompileOutput{
-				Result: model.CompileResult{Succeeded: true},
-				Artifact: &model.CompiledArtifact{
-					Name: req.ArtifactName,
-					Data: data,
-					Mode: req.ArtifactMode,
-				},
-			}, nil
-		}
-		slog.InfoContext(ctx, "compilation cache miss", "key", cacheKey[:16])
 	}
 
 	out, err := c.compileInContainer(ctx, req)
@@ -116,12 +78,6 @@ func (c *compiler) Compile(ctx context.Context, req CompileRequest) (CompileOutp
 	}
 	if out.Artifact == nil {
 		return out, errors.New("compile succeeded but artifact is missing")
-	}
-
-	if c.cache != nil {
-		if err := c.cache.StoreWithKey(ctx, cacheKey, out.Artifact.Data); err != nil {
-			slog.WarnContext(ctx, "failed to cache compilation artifact", "error", err)
-		}
 	}
 
 	return out, nil

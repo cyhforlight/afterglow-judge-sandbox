@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"afterglow-judge-sandbox/internal/sandbox"
-	"afterglow-judge-sandbox/internal/storage"
 
 	"github.com/stretchr/testify/require"
 )
@@ -94,10 +93,8 @@ func newIntegrationContext(t *testing.T, timeout time.Duration) context.Context 
 func newCompilerForTest(t *testing.T) UserCodeCompiler {
 	t.Helper()
 	sb := sandbox.NewContainerdSandbox("", "")
-	cacheDir := t.TempDir()
-	cacheStorage, err := storage.NewCacheStorage(cacheDir, 100)
-	require.NoError(t, err)
-	return NewUserCodeCompiler(NewCompiler(sb, cacheStorage))
+	// User code compiler should not use cache (matches production config)
+	return NewUserCodeCompiler(NewCompiler(sb))
 }
 
 func newRunnerForTest(t *testing.T) UserCodeRunner {

@@ -39,7 +39,7 @@ func TestCheckerCompiler_CompilesSourceAndSupportFiles(t *testing.T) {
 		},
 	}
 
-	compiler := NewCheckerCompiler(NewCompiler(sb, nil))
+	compiler := NewCheckerCompiler(NewCompiler(sb))
 	out, err := compiler.Compile(context.Background(), CheckerCompileRequest{
 		SourceCode: []byte("#include \"testlib.h\"\nint main() { return 0; }\n"),
 		SupportFiles: []CompileFile{{
