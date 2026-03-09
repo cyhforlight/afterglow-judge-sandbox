@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"afterglow-judge-sandbox/internal/service"
 )
 
 // Config holds all server configuration.
@@ -25,6 +27,8 @@ type Config struct {
 	// Execution Limits
 	MaxConcurrentExecutions int
 	MaxInputSizeMB          int
+	DefaultChecker          string
+	AllowedCheckers         []string
 
 	// Security
 	EnableAuth     bool
@@ -52,6 +56,8 @@ func Load() *Config {
 		// Execution Limits
 		MaxConcurrentExecutions: getEnvInt("MAX_CONCURRENT_EXECUTIONS", 10),
 		MaxInputSizeMB:          getEnvInt("MAX_INPUT_SIZE_MB", 256),
+		DefaultChecker:          getEnv("DEFAULT_CHECKER", "default"),
+		AllowedCheckers:         getEnvSlice("ALLOWED_CHECKERS", service.BuiltinCheckerNames()),
 
 		// Security
 		EnableAuth:     getEnvBool("ENABLE_AUTH", false),

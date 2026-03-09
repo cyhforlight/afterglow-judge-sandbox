@@ -74,6 +74,10 @@ func initializeComponents(cfg *config.Config) (service.JudgeService, error) {
 	userCodeRunner := service.NewUserCodeRunner(baseRunner)
 	checkerCompiler := service.NewCheckerCompiler(baseCompiler)
 	checkerRunner := service.NewCheckerRunner(baseRunner)
+	checkerPolicy, err := service.NewCheckerPolicy(cfg.DefaultChecker, cfg.AllowedCheckers)
+	if err != nil {
+		return nil, fmt.Errorf("initialize checker policy: %w", err)
+	}
 
 	// 6. Create judge engine with internal checker resources.
 	judge := service.NewJudgeEngine(
@@ -82,6 +86,7 @@ func initializeComponents(cfg *config.Config) (service.JudgeService, error) {
 		checkerCompiler,
 		checkerRunner,
 		internalStorage,
+		checkerPolicy,
 	)
 
 	ctx := context.Background()

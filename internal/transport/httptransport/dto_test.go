@@ -94,6 +94,7 @@ func TestJudgeRequestDTO_Validate(t *testing.T) {
 func TestJudgeRequestDTO_ToModel(t *testing.T) {
 	dto := JudgeRequestDTO{
 		SourceCode:  "print(42)",
+		Checker:     " ncmp ",
 		Language:    "py",
 		TimeLimit:   1000,
 		MemoryLimit: 128,
@@ -107,6 +108,7 @@ func TestJudgeRequestDTO_ToModel(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, model.LanguagePython, got.Language)
+	assert.Equal(t, "ncmp", got.Checker)
 	require.Len(t, got.TestCases, 2)
 	assert.Equal(t, "case-1", got.TestCases[0].Name)
 	assert.Equal(t, "case-b", got.TestCases[1].Name)

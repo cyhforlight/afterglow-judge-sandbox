@@ -14,6 +14,7 @@ curl -X POST http://localhost:8080/v1/execute \
   -H "Content-Type: application/json" \
   -d "{
     \"sourceCode\": $(jq -Rs . <<<"$SOURCE_CODE"),
+    \"checker\": \"default\",
     \"language\": \"Python\",
     \"timeLimit\": 1000,
     \"memoryLimit\": 256,

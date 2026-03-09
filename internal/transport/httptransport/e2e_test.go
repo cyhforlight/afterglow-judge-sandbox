@@ -63,7 +63,9 @@ func newE2EHandler(t *testing.T) *Handler {
 	runner := service.NewUserCodeRunner(baseRunner)
 	checkerCompiler := service.NewCheckerCompiler(baseCompiler)
 	checkerRunner := service.NewCheckerRunner(baseRunner)
-	judge := service.NewJudgeEngine(runner, compiler, checkerCompiler, checkerRunner, internalStorage)
+	checkerPolicy, err := service.NewCheckerPolicy("default", service.BuiltinCheckerNames())
+	require.NoError(t, err)
+	judge := service.NewJudgeEngine(runner, compiler, checkerCompiler, checkerRunner, internalStorage, checkerPolicy)
 
 	ctx := context.Background()
 	if err := judge.PreflightCheck(ctx); err != nil {
@@ -138,6 +140,26 @@ func TestE2E_HTTP_Python_WA(t *testing.T) {
 	assert.Equal(t, "WrongAnswer", resp.Verdict)
 	require.Len(t, resp.Cases, 1)
 	assert.Equal(t, "WrongAnswer", resp.Cases[0].Verdict)
+}
+
+func TestE2E_HTTP_Python_CustomChecker(t *testing.T) {
+	requireE2EPrerequisites(t)
+	handler := newE2EHandler(t)
+
+	reqBody := JudgeRequestDTO{
+		SourceCode:  `print("yes")`,
+		Checker:     "yesno",
+		Language:    "Python",
+		TimeLimit:   2000,
+		MemoryLimit: 256,
+		TestCases:   []JudgeTestCaseDTO{{Name: "case-1", InputText: "", ExpectedOutputText: "YES\n"}},
+	}
+
+	resp := executeJudgeRequest(t, handler, reqBody)
+
+	assert.Equal(t, "OK", resp.Verdict)
+	require.Len(t, resp.Cases, 1)
+	assert.Equal(t, "OK", resp.Cases[0].Verdict)
 }
 
 func TestE2E_HTTP_CPP_TLE(t *testing.T) {

@@ -55,7 +55,7 @@ func newInternalResourceStoreForTest(t *testing.T) ResourceStore {
 	return resourceStore
 }
 
-func compileCheckerForTest(t *testing.T, ctx context.Context, checkerName string) model.CompiledArtifact {
+func compileCheckerForTest(ctx context.Context, t *testing.T, checkerName string) model.CompiledArtifact {
 	t.Helper()
 
 	resourceStore := newInternalResourceStoreForTest(t)
@@ -256,7 +256,7 @@ func TestChecker_AllBundledCheckers(t *testing.T) {
 	for _, scenario := range checkerScenarios() {
 		t.Run(strings.TrimSuffix(scenario.checker, ".cpp"), func(t *testing.T) {
 			ctx := newIntegrationContext(t, 90*time.Second)
-			checker := compileCheckerForTest(t, ctx, scenario.checker)
+			checker := compileCheckerForTest(ctx, t, scenario.checker)
 			runner := newCheckerRunnerForTest(t)
 
 			cases := []checkerCase{scenario.okCase, scenario.failCase}

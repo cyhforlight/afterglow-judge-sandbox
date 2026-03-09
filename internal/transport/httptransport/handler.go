@@ -54,6 +54,10 @@ func (h *Handler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
 		return
 	}
+	if err := h.judge.ValidateCheckerPolicy(ctx, judgeRequest); err != nil {
+		h.writeError(w, http.StatusBadRequest, "INVALID_REQUEST", err.Error())
+		return
+	}
 
 	result := h.judge.Judge(ctx, judgeRequest)
 	h.writeJSON(w, http.StatusOK, ToJudgeResponse(result))

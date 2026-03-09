@@ -136,6 +136,7 @@ type JudgeTestCase struct {
 // JudgeRequest contains parameters for a full judge session.
 type JudgeRequest struct {
 	SourceCode  string          `json:"sourceCode"`
+	Checker     string          `json:"checker,omitempty"`
 	Language    Language        `json:"language"`
 	TimeLimit   int             `json:"timeLimit"`   // milliseconds, per test case
 	MemoryLimit int             `json:"memoryLimit"` // megabytes, per test case

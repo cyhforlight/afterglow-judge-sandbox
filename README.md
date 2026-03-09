@@ -24,6 +24,7 @@ curl -X POST http://localhost:8080/v1/execute \
   -H "Content-Type: application/json" \
   -d '{
     "sourceCode": "import sys\\nn=int(sys.stdin.readline())\\nprint(n*2)",
+    "checker": "default",
     "language": "Python",
     "timeLimit": 1000,
     "memoryLimit": 256,
@@ -65,6 +66,7 @@ Content-Type: application/json
 ```json
 {
   "sourceCode": "<源代码纯文本>",
+  "checker": "default",
   "language": "C++",
   "timeLimit": 1000,
   "memoryLimit": 256,
@@ -77,6 +79,8 @@ Content-Type: application/json
   ]
 }
 ```
+
+`checker` 是可选字段，使用内置 checker 短名。当前内置列表为：`default`、`ncmp`、`wcmp`、`fcmp`、`yesno`、`nyesno`、`lcmp`、`hcmp`、`rcmp4`、`rcmp6`、`rcmp9`。未传时会回退到服务端配置的默认 checker。
 
 响应体：
 
@@ -132,6 +136,8 @@ GET /health
 | `CONTAINERD_SOCKET` | `/run/containerd/containerd.sock` | Containerd 套接字 |
 | `MAX_CONCURRENT_EXECUTIONS` | `10` | 最大并发评测任务数 |
 | `MAX_INPUT_SIZE_MB` | `256` | 最大请求体限制 |
+| `DEFAULT_CHECKER` | `default` | 未指定 `checker` 时使用的默认内置 checker |
+| `ALLOWED_CHECKERS` | `default,ncmp,wcmp,fcmp,yesno,nyesno,lcmp,hcmp,rcmp4,rcmp6,rcmp9` | 允许请求选择的 checker 短名列表（逗号分隔） |
 | `ENABLE_AUTH` | `false` | 启用 API Key 认证 |
 | `API_KEYS` | - | API Key 列表（逗号分隔） |
 | `ALLOWED_ORIGINS` | `*` | CORS 允许来源 |

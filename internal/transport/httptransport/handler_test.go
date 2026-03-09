@@ -19,15 +19,23 @@ import (
 
 type mockJudgeService struct {
 	preflightErr error
+	validateErr  error
 	result       model.JudgeResult
 	lastRequest  model.JudgeRequest
+	judgeCalls   int
 }
 
 func (m *mockJudgeService) PreflightCheck(_ context.Context) error {
 	return m.preflightErr
 }
 
+func (m *mockJudgeService) ValidateCheckerPolicy(_ context.Context, req model.JudgeRequest) error {
+	m.lastRequest = req
+	return m.validateErr
+}
+
 func (m *mockJudgeService) Judge(_ context.Context, req model.JudgeRequest) model.JudgeResult {
+	m.judgeCalls++
 	m.lastRequest = req
 	return m.result
 }
@@ -42,6 +50,7 @@ func makeJudgeBody(t *testing.T, dto JudgeRequestDTO) io.Reader {
 func validJudgeRequest() JudgeRequestDTO {
 	return JudgeRequestDTO{
 		SourceCode:  "print(42)",
+		Checker:     "default",
 		Language:    "Python",
 		TimeLimit:   1000,
 		MemoryLimit: 128,
@@ -102,6 +111,7 @@ func TestHandleExecute_Success(t *testing.T) {
 	assert.Equal(t, "OK", resp.Verdict)
 	assert.Equal(t, 1, resp.PassedCount)
 	assert.Equal(t, "Python", service.lastRequest.Language.String())
+	assert.Equal(t, "default", service.lastRequest.Checker)
 }
 
 func TestHandleExecute_InvalidJSON(t *testing.T) {
@@ -148,6 +158,26 @@ func TestHandleExecute_InvalidLanguage(t *testing.T) {
 	handler.HandleExecute(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestHandleExecute_InvalidCheckerPolicy(t *testing.T) {
+	service := &mockJudgeService{validateErr: errors.New(`checker "ncmp" is not allowed`)}
+	handler := NewHandler(service, slog.Default(), 256)
+
+	dto := validJudgeRequest()
+	dto.Checker = "ncmp"
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/execute", makeJudgeBody(t, dto))
+	w := httptest.NewRecorder()
+	handler.HandleExecute(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, 0, service.judgeCalls)
+
+	var resp ErrorResponseDTO
+	err := json.NewDecoder(w.Body).Decode(&resp)
+	require.NoError(t, err)
+	assert.Equal(t, `checker "ncmp" is not allowed`, resp.Details)
 }
 
 func TestHandleExecute_BodyTooLarge(t *testing.T) {

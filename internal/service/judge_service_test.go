@@ -86,9 +86,11 @@ func (r *fakeCheckerRunner) Run(_ context.Context, _ CheckerRunRequest) (Checker
 type fakeResourceStore struct {
 	files map[string][]byte
 	err   error
+	keys  []string
 }
 
 func (s *fakeResourceStore) Get(_ context.Context, key string) ([]byte, error) {
+	s.keys = append(s.keys, key)
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -145,8 +147,12 @@ func newTestJudgeEngine(
 			testlibHeaderKey:        []byte("header"),
 		}}
 	}
+	checkerPolicy, err := NewCheckerPolicy(defaultCheckerName, BuiltinCheckerNames())
+	if err != nil {
+		panic(err)
+	}
 
-	return NewJudgeEngine(runner, compiler, checkerCompiler, checkerRunner, resources)
+	return NewJudgeEngine(runner, compiler, checkerCompiler, checkerRunner, resources, checkerPolicy)
 }
 
 func successfulCompileOutput(language model.Language) UserCodeCompileOutput {
@@ -545,6 +551,54 @@ func TestJudgeEngine_MissingCheckerResourceReturnsUnknownError(t *testing.T) {
 	assert.True(t, result.Compile.Succeeded)
 	require.Len(t, result.Cases, 1)
 	assert.Contains(t, result.Cases[0].ExtraInfo, testlibHeaderKey)
+}
+
+func TestJudgeEngine_ValidateCheckerPolicy_RejectsDisallowedChecker(t *testing.T) {
+	checkerPolicy, err := NewCheckerPolicy(defaultCheckerName, []string{defaultCheckerName})
+	require.NoError(t, err)
+
+	engine := NewJudgeEngine(
+		&fakeRunner{},
+		&fakeCompiler{},
+		&fakeCheckerCompiler{},
+		&fakeCheckerRunner{},
+		&fakeResourceStore{},
+		checkerPolicy,
+	)
+
+	err = engine.ValidateCheckerPolicy(context.Background(), model.JudgeRequest{Checker: "ncmp"})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `checker "ncmp" is not allowed`)
+}
+
+func TestJudgeEngine_Judge_UsesRequestedChecker(t *testing.T) {
+	resources := &fakeResourceStore{files: map[string][]byte{
+		defaultCheckerSourceKey: []byte("default checker source"),
+		"checkers/yesno.cpp":    []byte("yesno checker source"),
+		testlibHeaderKey:        []byte("header"),
+	}}
+	engine := newTestJudgeEngine(
+		&fakeRunner{result: model.ExecuteResult{Verdict: model.VerdictOK, Stdout: "YES\n"}},
+		&fakeCompiler{output: successfulCompileOutput(model.LanguageCPP)},
+		nil,
+		&fakeCheckerRunner{result: CheckerRunResult{Verdict: model.VerdictOK}},
+		resources,
+	)
+
+	result := engine.Judge(context.Background(), model.JudgeRequest{
+		SourceCode:  "code",
+		Checker:     "yesno",
+		Language:    model.LanguageCPP,
+		TimeLimit:   1000,
+		MemoryLimit: 128,
+		TestCases: []model.JudgeTestCase{
+			{Name: "case-1", ExpectedOutput: "YES\n"},
+		},
+	})
+
+	assert.Equal(t, model.VerdictOK, result.Verdict)
+	assert.Contains(t, resources.keys, "checkers/yesno.cpp")
+	assert.NotContains(t, resources.keys, defaultCheckerSourceKey)
 }
 
 func TestJudgeEngine_UserRuntimeErrorSkipsChecker(t *testing.T) {

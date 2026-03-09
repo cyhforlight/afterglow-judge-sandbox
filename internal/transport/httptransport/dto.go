@@ -19,6 +19,7 @@ type JudgeTestCaseDTO struct {
 // JudgeRequestDTO represents an HTTP judge request.
 type JudgeRequestDTO struct {
 	SourceCode  string             `json:"sourceCode"`
+	Checker     string             `json:"checker,omitempty"`
 	Language    string             `json:"language"`
 	TimeLimit   int                `json:"timeLimit"`   // milliseconds
 	MemoryLimit int                `json:"memoryLimit"` // megabytes
@@ -110,6 +111,7 @@ func (dto *JudgeRequestDTO) ToModel() (model.JudgeRequest, error) {
 
 	return model.JudgeRequest{
 		SourceCode:  dto.SourceCode,
+		Checker:     strings.TrimSpace(dto.Checker),
 		Language:    language,
 		TimeLimit:   dto.TimeLimit,
 		MemoryLimit: dto.MemoryLimit,

@@ -90,10 +90,7 @@ func (c *checkerCompiler) Compile(ctx context.Context, req CheckerCompileRequest
 		out.Artifact.Name = checkerArtifactFileName
 	}
 
-	return CheckerCompileOutput{
-		Result:   out.Result,
-		Artifact: out.Artifact,
-	}, nil
+	return CheckerCompileOutput(out), nil
 }
 
 // CheckerRunRequest contains the files required to compare one testcase.
