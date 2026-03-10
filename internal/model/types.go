@@ -128,9 +128,11 @@ type ExecuteResult struct {
 
 // JudgeTestCase represents a single test case for judging.
 type JudgeTestCase struct {
-	Name           string `json:"name"`
-	InputText      string `json:"inputText"`
-	ExpectedOutput string `json:"expectedOutputText"`
+	Name               string `json:"name"`
+	InputText          string `json:"inputText"`
+	ExpectedOutput     string `json:"expectedOutputText"`
+	InputFile          string `json:"inputFile,omitempty"`
+	ExpectedOutputFile string `json:"expectedOutputFile,omitempty"`
 }
 
 // JudgeRequest contains parameters for a full judge session.

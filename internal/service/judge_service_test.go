@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"testing"
 
 	"afterglow-judge-sandbox/internal/model"
@@ -152,7 +153,7 @@ func newTestJudgeEngine(
 		panic(err)
 	}
 
-	return NewJudgeEngine(runner, compiler, checkerCompiler, checkerRunner, resources, checkerPolicy)
+	return NewJudgeEngine(runner, compiler, checkerCompiler, checkerRunner, resources, nil, checkerPolicy)
 }
 
 func successfulCompileOutput(language model.Language) UserCodeCompileOutput {
@@ -563,6 +564,7 @@ func TestJudgeEngine_ValidateCheckerPolicy_RejectsDisallowedChecker(t *testing.T
 		&fakeCheckerCompiler{},
 		&fakeCheckerRunner{},
 		&fakeResourceStore{},
+		nil,
 		checkerPolicy,
 	)
 
@@ -652,4 +654,86 @@ func TestJudgeEngine_CheckerRunnerErrorMarksCaseUnknownError(t *testing.T) {
 	assert.Contains(t, result.Cases[0].ExtraInfo, "checker infrastructure error")
 	assert.Equal(t, model.VerdictUKE, result.Verdict)
 	assert.Equal(t, 2, checkerRunner.calls)
+}
+
+func TestJudgeEngine_DoesNotMutateCallerRequest(t *testing.T) {
+	// Create a fake external storage that returns test data
+	fakeStorage := &fakeExternalStorage{
+		files: map[string][]byte{
+			"test.in":  []byte("input data"),
+			"test.out": []byte("expected output"),
+		},
+	}
+
+	runner := &fakeRunner{result: model.ExecuteResult{Verdict: model.VerdictOK, Stdout: "expected output"}}
+	compiler := &fakeCompiler{output: successfulCompileOutput(model.LanguageCPP)}
+	checkerCompiler := &fakeCheckerCompiler{
+		output: CheckerCompileOutput{
+			Result:   model.CompileResult{Succeeded: true},
+			Artifact: &model.CompiledArtifact{Name: "checker", Data: []byte("checker"), Mode: 0o755},
+		},
+	}
+	checkerRunner := &fakeCheckerRunner{result: CheckerRunResult{Verdict: model.VerdictOK}}
+	resources := &fakeResourceStore{files: map[string][]byte{defaultCheckerSourceKey: []byte("checker"), testlibHeaderKey: []byte("header")}}
+
+	checkerPolicy, err := NewCheckerPolicy("default", BuiltinCheckerNames())
+	require.NoError(t, err)
+
+	engine := &JudgeEngine{
+		runner:          runner,
+		compiler:        compiler,
+		checkerCompiler: checkerCompiler,
+		checkerRunner:   checkerRunner,
+		resources:       resources,
+		externalStorage: fakeStorage,
+		checkerPolicy:   checkerPolicy,
+		log:             slog.Default(),
+	}
+
+	// Create original request with file paths
+	originalReq := model.JudgeRequest{
+		SourceCode:  "code",
+		Language:    model.LanguageCPP,
+		TimeLimit:   1000,
+		MemoryLimit: 128,
+		TestCases: []model.JudgeTestCase{
+			{
+				Name:               "case-1",
+				InputFile:          "test.in",
+				ExpectedOutputFile: "test.out",
+			},
+		},
+	}
+
+	// Call Judge
+	result := engine.Judge(context.Background(), originalReq)
+
+	// Verify result is OK
+	assert.Equal(t, model.VerdictOK, result.Verdict)
+
+	// Verify original request was NOT mutated
+	assert.Equal(t, "test.in", originalReq.TestCases[0].InputFile, "InputFile should not be cleared")
+	assert.Equal(t, "test.out", originalReq.TestCases[0].ExpectedOutputFile, "ExpectedOutputFile should not be cleared")
+	assert.Empty(t, originalReq.TestCases[0].InputText, "InputText should remain empty")
+	assert.Empty(t, originalReq.TestCases[0].ExpectedOutput, "ExpectedOutput should remain empty")
+
+	// Call Judge again with the same request to verify it still works
+	result2 := engine.Judge(context.Background(), originalReq)
+	assert.Equal(t, model.VerdictOK, result2.Verdict, "Second call should also succeed")
+	assert.Equal(t, 4, fakeStorage.getCalls, "Should load files 4 times (2 files × 2 calls)")
+}
+
+// fakeExternalStorage implements a simple in-memory external storage for testing
+type fakeExternalStorage struct {
+	files    map[string][]byte
+	getCalls int
+}
+
+func (f *fakeExternalStorage) Get(_ context.Context, path string) ([]byte, error) {
+	f.getCalls++
+	data, ok := f.files[path]
+	if !ok {
+		return nil, fmt.Errorf("file not found: %s", path)
+	}
+	return data, nil
 }

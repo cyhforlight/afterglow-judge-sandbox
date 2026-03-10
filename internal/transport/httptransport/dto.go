@@ -14,6 +14,8 @@ type JudgeTestCaseDTO struct {
 	Name               string `json:"name"`
 	InputText          string `json:"inputText"`
 	ExpectedOutputText string `json:"expectedOutputText"`
+	InputFile          string `json:"inputFile,omitempty"`
+	ExpectedOutputFile string `json:"expectedOutputFile,omitempty"`
 }
 
 // JudgeRequestDTO represents an HTTP judge request.
@@ -78,12 +80,31 @@ func (dto *JudgeRequestDTO) Validate() error {
 	}
 
 	for i, tc := range dto.TestCases {
+		if err := tc.ValidateTestCase(i); err != nil {
+			return err
+		}
 		if strings.TrimSpace(tc.Name) == "" {
 			continue
 		}
 		if strings.ContainsRune(tc.Name, '\n') {
 			return fmt.Errorf("testcases[%d].name must be single-line", i)
 		}
+	}
+
+	return nil
+}
+
+// ValidateTestCase checks mutual exclusivity of text vs file fields.
+func (tc *JudgeTestCaseDTO) ValidateTestCase(index int) error {
+	hasInputFile := strings.TrimSpace(tc.InputFile) != ""
+	hasOutputFile := strings.TrimSpace(tc.ExpectedOutputFile) != ""
+
+	// If both file fields are provided, check mutual exclusivity
+	if hasInputFile && tc.InputText != "" {
+		return fmt.Errorf("testcases[%d]: cannot provide both inputText and inputFile", index)
+	}
+	if hasOutputFile && tc.ExpectedOutputText != "" {
+		return fmt.Errorf("testcases[%d]: cannot provide both expectedOutputText and expectedOutputFile", index)
 	}
 
 	return nil
@@ -103,9 +124,11 @@ func (dto *JudgeRequestDTO) ToModel() (model.JudgeRequest, error) {
 			name = fmt.Sprintf("case-%d", idx+1)
 		}
 		testCases = append(testCases, model.JudgeTestCase{
-			Name:           name,
-			InputText:      testCase.InputText,
-			ExpectedOutput: testCase.ExpectedOutputText,
+			Name:               name,
+			InputText:          testCase.InputText,
+			ExpectedOutput:     testCase.ExpectedOutputText,
+			InputFile:          strings.TrimSpace(testCase.InputFile),
+			ExpectedOutputFile: strings.TrimSpace(testCase.ExpectedOutputFile),
 		})
 	}
 

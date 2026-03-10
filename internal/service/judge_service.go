@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"afterglow-judge-sandbox/internal/model"
+	"afterglow-judge-sandbox/internal/storage"
 )
 
 // JudgeService handles full judge orchestration.
@@ -24,6 +25,7 @@ type JudgeEngine struct {
 	checkerCompiler CheckerCompiler
 	checkerRunner   CheckerRunner
 	resources       ResourceStore
+	externalStorage ResourceStore
 	checkerPolicy   *CheckerPolicy
 	log             *slog.Logger
 }
@@ -35,6 +37,7 @@ func NewJudgeEngine(
 	checkerCompiler CheckerCompiler,
 	checkerRunner CheckerRunner,
 	resources ResourceStore,
+	externalStorage *storage.ExternalStorage,
 	checkerPolicy *CheckerPolicy,
 ) *JudgeEngine {
 	return &JudgeEngine{
@@ -43,6 +46,7 @@ func NewJudgeEngine(
 		checkerCompiler: checkerCompiler,
 		checkerRunner:   checkerRunner,
 		resources:       resources,
+		externalStorage: externalStorage,
 		checkerPolicy:   checkerPolicy,
 		log:             slog.Default(),
 	}
@@ -69,6 +73,27 @@ func (s *JudgeEngine) Judge(ctx context.Context, req model.JudgeRequest) model.J
 				Log:       err.Error(),
 			},
 			TotalCount: len(req.TestCases),
+		}
+	}
+
+	// Deep copy TestCases to avoid mutating caller's data
+	testCases := make([]model.JudgeTestCase, len(req.TestCases))
+	copy(testCases, req.TestCases)
+	req.TestCases = testCases
+
+	// Load test case files before compilation
+	for i := range req.TestCases {
+		if err := s.loadTestCaseData(ctx, &req.TestCases[i]); err != nil {
+			s.log.ErrorContext(ctx, "failed to load test case data",
+				"testCase", req.TestCases[i].Name, "error", err)
+			return model.JudgeResult{
+				Verdict: model.VerdictUKE,
+				Compile: model.CompileResult{
+					Succeeded: false,
+					Log:       fmt.Sprintf("test data loading failed: %v", err),
+				},
+				TotalCount: len(req.TestCases),
+			}
 		}
 	}
 
@@ -146,6 +171,38 @@ func (s *JudgeEngine) Judge(ctx context.Context, req model.JudgeRequest) model.J
 		PassedCount: passedCount,
 		TotalCount:  len(req.TestCases),
 	}
+}
+
+// loadTestCaseData resolves file paths to actual content strings.
+// Modifies testCase in-place, converting file paths to text.
+func (s *JudgeEngine) loadTestCaseData(ctx context.Context, testCase *model.JudgeTestCase) error {
+	// Load input data
+	if testCase.InputFile != "" {
+		if s.externalStorage == nil {
+			return fmt.Errorf("external storage not configured, cannot load inputFile: %s", testCase.InputFile)
+		}
+		data, err := s.externalStorage.Get(ctx, testCase.InputFile)
+		if err != nil {
+			return fmt.Errorf("load inputFile %q: %w", testCase.InputFile, err)
+		}
+		testCase.InputText = string(data)
+		testCase.InputFile = "" // Clear after loading
+	}
+
+	// Load expected output data
+	if testCase.ExpectedOutputFile != "" {
+		if s.externalStorage == nil {
+			return fmt.Errorf("external storage not configured, cannot load expectedOutputFile: %s", testCase.ExpectedOutputFile)
+		}
+		data, err := s.externalStorage.Get(ctx, testCase.ExpectedOutputFile)
+		if err != nil {
+			return fmt.Errorf("load expectedOutputFile %q: %w", testCase.ExpectedOutputFile, err)
+		}
+		testCase.ExpectedOutput = string(data)
+		testCase.ExpectedOutputFile = "" // Clear after loading
+	}
+
+	return nil
 }
 
 func validateJudgeRequest(req model.JudgeRequest) error {

@@ -76,6 +76,60 @@ func TestJudgeRequestDTO_Validate(t *testing.T) {
 			wantErr: true,
 			errMsg:  "testcases must not be empty",
 		},
+		{
+			name: "both inputText and inputFile",
+			dto: JudgeRequestDTO{
+				SourceCode:  "print(42)",
+				Language:    "Python",
+				TimeLimit:   1000,
+				MemoryLimit: 128,
+				TestCases: []JudgeTestCaseDTO{
+					{
+						Name:               "case-1",
+						InputText:          "test",
+						InputFile:          "file.in",
+						ExpectedOutputText: "42\n",
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "cannot provide both inputText and inputFile",
+		},
+		{
+			name: "both expectedOutputText and expectedOutputFile",
+			dto: JudgeRequestDTO{
+				SourceCode:  "print(42)",
+				Language:    "Python",
+				TimeLimit:   1000,
+				MemoryLimit: 128,
+				TestCases: []JudgeTestCaseDTO{
+					{
+						Name:               "case-1",
+						InputText:          "test",
+						ExpectedOutputText: "42\n",
+						ExpectedOutputFile: "file.out",
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "cannot provide both expectedOutputText and expectedOutputFile",
+		},
+		{
+			name: "valid with file paths",
+			dto: JudgeRequestDTO{
+				SourceCode:  "print(42)",
+				Language:    "Python",
+				TimeLimit:   1000,
+				MemoryLimit: 128,
+				TestCases: []JudgeTestCaseDTO{
+					{
+						Name:               "case-1",
+						InputFile:          "test.in",
+						ExpectedOutputFile: "test.out",
+					},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {

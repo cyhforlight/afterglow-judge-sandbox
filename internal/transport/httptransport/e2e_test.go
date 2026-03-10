@@ -57,6 +57,11 @@ func newE2EHandler(t *testing.T) *Handler {
 	compileCache, err := cache.New(100)
 	require.NoError(t, err)
 
+	// Initialize ExternalStorage for test data files
+	testdataDir := filepath.Join(projectRoot(t), "testdata")
+	externalStorage, err := storage.NewExternalStorage(testdataDir, compileCache)
+	require.NoError(t, err)
+
 	baseCompiler := service.NewCompiler(sb)
 	baseRunner := service.NewRunner(sb)
 	compiler := service.NewUserCodeCompiler(baseCompiler)
@@ -65,7 +70,8 @@ func newE2EHandler(t *testing.T) *Handler {
 	checkerRunner := service.NewCheckerRunner(baseRunner)
 	checkerPolicy, err := service.NewCheckerPolicy("default", service.BuiltinCheckerNames())
 	require.NoError(t, err)
-	judge := service.NewJudgeEngine(runner, compiler, checkerCompiler, checkerRunner, internalStorage, checkerPolicy)
+	judge := service.NewJudgeEngine(runner, compiler, checkerCompiler, checkerRunner,
+		internalStorage, externalStorage, checkerPolicy)
 
 	ctx := context.Background()
 	if err := judge.PreflightCheck(ctx); err != nil {
@@ -236,4 +242,75 @@ func executeConcurrentJudgeRequest(handler *Handler, reqBody JudgeRequestDTO) (J
 	handler.HandleExecute(w, req)
 
 	return decodeJudgeResponse(w.Body)
+}
+
+func TestE2E_HTTP_ExternalTestFiles(t *testing.T) {
+	requireE2EPrerequisites(t)
+	handler := newE2EHandler(t)
+
+	// Read actual code from P1 test case
+	codeBytes, err := os.ReadFile(filepath.Join(projectRoot(t),
+		"testdata/E2E_cases/P1/code/code_1_ac.cpp"))
+	require.NoError(t, err)
+
+	reqBody := JudgeRequestDTO{
+		SourceCode:  string(codeBytes),
+		Language:    "C++",
+		TimeLimit:   1000,
+		MemoryLimit: 256,
+		TestCases: []JudgeTestCaseDTO{
+			{
+				Name:               "sum1",
+				InputFile:          "E2E_cases/P1/data/sum1.in",
+				ExpectedOutputFile: "E2E_cases/P1/data/sum1.out",
+			},
+			{
+				Name:               "sum2",
+				InputFile:          "E2E_cases/P1/data/sum2.in",
+				ExpectedOutputFile: "E2E_cases/P1/data/sum2.out",
+			},
+		},
+	}
+
+	resp := executeJudgeRequest(t, handler, reqBody)
+
+	assert.Equal(t, "OK", resp.Verdict)
+	assert.True(t, resp.Compile.Succeeded)
+	assert.Equal(t, 2, resp.PassedCount)
+	assert.Equal(t, 2, resp.TotalCount)
+}
+
+func TestE2E_HTTP_FileNotFound(t *testing.T) {
+	requireE2EPrerequisites(t)
+	handler := newE2EHandler(t)
+
+	reqBody := JudgeRequestDTO{
+		SourceCode:  `print("test")`,
+		Language:    "Python",
+		TimeLimit:   2000,
+		MemoryLimit: 256,
+		TestCases: []JudgeTestCaseDTO{
+			{
+				Name:               "missing",
+				InputFile:          "nonexistent/file.in",
+				ExpectedOutputFile: "E2E_cases/P1/data/sum1.out",
+			},
+		},
+	}
+
+	body, err := json.Marshal(reqBody)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/execute", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.HandleExecute(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	resp, err := decodeJudgeResponse(w.Body)
+	require.NoError(t, err)
+
+	assert.Equal(t, "UnknownError", resp.Verdict)
+	assert.Contains(t, resp.Compile.Log, "test data loading failed")
+	assert.Contains(t, resp.Compile.Log, "nonexistent/file.in")
 }

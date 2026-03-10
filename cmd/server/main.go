@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"afterglow-judge-sandbox/internal/cache"
@@ -64,11 +65,31 @@ func initializeComponents(cfg *config.Config) (service.JudgeService, error) {
 		compileCache = nil // Allow running without cache
 	}
 
-	// 4. Create base compiler and runner primitives.
+	// 4. Create ExternalStorage for test data files
+	executablePath, err := os.Executable()
+	if err != nil {
+		slog.Warn("failed to resolve executable path for testdata", "error", err)
+	}
+	var externalStorage *storage.ExternalStorage
+	if executablePath != "" {
+		resolvedPath, err := filepath.EvalSymlinks(executablePath)
+		if err != nil {
+			slog.Warn("failed to resolve executable symlinks", "error", err)
+		} else {
+			testdataDir := filepath.Join(filepath.Dir(resolvedPath), "testdata")
+			externalStorage, err = storage.NewExternalStorage(testdataDir, compileCache)
+			if err != nil {
+				slog.Warn("failed to initialize external storage", "error", err, "path", testdataDir)
+				externalStorage = nil
+			}
+		}
+	}
+
+	// 5. Create base compiler and runner primitives.
 	baseCompiler := service.NewCompiler(sb)
 	baseRunner := service.NewRunner(sb)
 
-	// 5. Create semantic-layer services.
+	// 6. Create semantic-layer services.
 	userCodeCompiler := service.NewUserCodeCompiler(baseCompiler)
 	userCodeRunner := service.NewUserCodeRunner(baseRunner)
 	checkerCompiler := service.NewCheckerCompiler(service.NewCachedCompiler(baseCompiler, compileCache))
@@ -78,13 +99,14 @@ func initializeComponents(cfg *config.Config) (service.JudgeService, error) {
 		return nil, fmt.Errorf("initialize checker policy: %w", err)
 	}
 
-	// 6. Create judge engine with internal checker resources.
+	// 7. Create judge engine with internal checker resources.
 	judge := service.NewJudgeEngine(
 		userCodeRunner,
 		userCodeCompiler,
 		checkerCompiler,
 		checkerRunner,
 		internalStorage,
+		externalStorage,
 		checkerPolicy,
 	)
 
