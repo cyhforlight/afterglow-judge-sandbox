@@ -149,6 +149,9 @@ func (p *CheckerPolicy) Resolve(raw string) (CheckerLocation, error) {
 		}
 
 		// Check if external checkers are allowed
+		// Note: This check uses the original request string, not the normalized path.
+		// In practice, most deployments use "external:*" which makes prefix matching
+		// ineffective. The real security boundary is ExternalStorage's mount point isolation.
 		if !p.isExternalCheckerAllowed(name) {
 			return CheckerLocation{}, fmt.Errorf("checker %q is not allowed (allowed: %v)", name, p.allowed)
 		}
