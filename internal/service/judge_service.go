@@ -78,7 +78,8 @@ func (s *JudgeEngine) Judge(ctx context.Context, req model.JudgeRequest) model.J
 		return failedBeforeRun(req.TestCases, err.Error())
 	}
 
-	// Deep copy TestCases to avoid mutating caller's data
+	// Copy TestCases to avoid mutating caller's slice.
+	// req is passed by value, but TestCases is a slice (reference type).
 	testCases := make([]model.JudgeTestCase, len(req.TestCases))
 	copy(testCases, req.TestCases)
 	req.TestCases = testCases

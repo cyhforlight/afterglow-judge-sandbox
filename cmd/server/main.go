@@ -22,7 +22,7 @@ func main() {
 	cfg := config.Load()
 	logger := setupLogger(cfg.LogLevel)
 
-	logger.Info("starting sandbox server", "addr", cfg.Addr())
+	logger.Info("starting sandbox server", "addr", fmt.Sprintf("%s:%d", cfg.HTTPAddr, cfg.HTTPPort))
 
 	judgeService, err := initializeComponents(cfg)
 	if err != nil {

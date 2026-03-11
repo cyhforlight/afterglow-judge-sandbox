@@ -2,7 +2,6 @@
 package config
 
 import (
-	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -57,11 +56,6 @@ func Load() *Config {
 		// Observability
 		LogLevel: getEnv("LOG_LEVEL", "info"),
 	}
-}
-
-// Addr returns the full HTTP address (host:port).
-func (c *Config) Addr() string {
-	return fmt.Sprintf("%s:%d", c.HTTPAddr, c.HTTPPort)
 }
 
 // getEnv retrieves an environment variable or returns a default value.

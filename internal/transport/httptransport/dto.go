@@ -83,28 +83,27 @@ func (dto *JudgeRequestDTO) Validate() error {
 		if err := tc.ValidateTestCase(i); err != nil {
 			return err
 		}
-		if strings.TrimSpace(tc.Name) == "" {
-			continue
-		}
-		if strings.ContainsRune(tc.Name, '\n') {
-			return fmt.Errorf("testcases[%d].name must be single-line", i)
-		}
 	}
 
 	return nil
 }
 
-// ValidateTestCase checks mutual exclusivity of text vs file fields.
+// ValidateTestCase checks mutual exclusivity of text vs file fields and name format.
 func (tc *JudgeTestCaseDTO) ValidateTestCase(index int) error {
 	hasInputFile := strings.TrimSpace(tc.InputFile) != ""
 	hasOutputFile := strings.TrimSpace(tc.ExpectedOutputFile) != ""
 
-	// If both file fields are provided, check mutual exclusivity
+	// Check mutual exclusivity
 	if hasInputFile && tc.InputText != "" {
 		return fmt.Errorf("testcases[%d]: cannot provide both inputText and inputFile", index)
 	}
 	if hasOutputFile && tc.ExpectedOutputText != "" {
 		return fmt.Errorf("testcases[%d]: cannot provide both expectedOutputText and expectedOutputFile", index)
+	}
+
+	// Validate name format: reject any newlines (including leading/trailing)
+	if strings.TrimSpace(tc.Name) != "" && strings.ContainsRune(tc.Name, '\n') {
+		return fmt.Errorf("testcases[%d].name must be single-line", index)
 	}
 
 	return nil

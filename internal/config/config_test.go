@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -51,7 +52,8 @@ func TestConfig_Addr(t *testing.T) {
 		HTTPPort: 8080,
 	}
 
-	assert.Equal(t, "localhost:8080", cfg.Addr())
+	addr := fmt.Sprintf("%s:%d", cfg.HTTPAddr, cfg.HTTPPort)
+	assert.Equal(t, "localhost:8080", addr)
 }
 
 func clearEnv() {

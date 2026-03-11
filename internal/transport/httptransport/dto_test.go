@@ -139,6 +139,34 @@ func TestJudgeRequestDTO_Validate(t *testing.T) {
 			wantErr: true,
 			errMsg:  "must be single-line",
 		},
+		{
+			name: "test case name with trailing newline",
+			dto: JudgeRequestDTO{
+				SourceCode:  "print(42)",
+				Language:    "Python",
+				TimeLimit:   1000,
+				MemoryLimit: 128,
+				TestCases: []JudgeTestCaseDTO{
+					{Name: "case\n", InputText: "", ExpectedOutputText: "42\n"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "must be single-line",
+		},
+		{
+			name: "test case name with leading newline",
+			dto: JudgeRequestDTO{
+				SourceCode:  "print(42)",
+				Language:    "Python",
+				TimeLimit:   1000,
+				MemoryLimit: 128,
+				TestCases: []JudgeTestCaseDTO{
+					{Name: "\ncase", InputText: "", ExpectedOutputText: "42\n"},
+				},
+			},
+			wantErr: true,
+			errMsg:  "must be single-line",
+		},
 	}
 
 	for _, tt := range tests {

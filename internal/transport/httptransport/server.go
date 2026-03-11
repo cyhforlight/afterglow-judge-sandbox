@@ -33,8 +33,9 @@ func NewServer(cfg *config.Config, judge service.JudgeService, logger *slog.Logg
 	finalHandler = LoggingMiddleware(logger)(finalHandler)
 	finalHandler = RecoveryMiddleware(logger)(finalHandler)
 
+	addr := fmt.Sprintf("%s:%d", cfg.HTTPAddr, cfg.HTTPPort)
 	httpServer := &http.Server{
-		Addr:         cfg.Addr(),
+		Addr:         addr,
 		Handler:      finalHandler,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
@@ -44,7 +45,7 @@ func NewServer(cfg *config.Config, judge service.JudgeService, logger *slog.Logg
 		httpServer: httpServer,
 		handler:    handler,
 		logger:     logger,
-		addr:       cfg.Addr(),
+		addr:       addr,
 	}
 }
 
