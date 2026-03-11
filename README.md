@@ -1,4 +1,4 @@
-# Afterglow Judge Sandbox
+# Afterglow Judge Engine
 
 一个基于 containerd 的代码评测引擎。它接收源代码和多组测试数据，完成编译、隔离执行、输出比对和聚合判定，并通过 HTTP 提供统一入口。
 
