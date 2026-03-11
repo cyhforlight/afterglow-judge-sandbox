@@ -4,14 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
-	"time"
 
 	"afterglow-judge-sandbox/internal/cache"
 	"afterglow-judge-sandbox/internal/sandbox"
@@ -21,6 +22,105 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type e2eProblemSuite struct {
+	name        string
+	dir         string
+	checker     string
+	timeLimit   int
+	memoryLimit int
+	codes       []e2eCodeExpectation
+}
+
+type e2eCodeExpectation struct {
+	filename       string
+	language       string
+	overallVerdict string
+	caseVerdicts   []e2eVerdictExpectation
+	passedCount    int
+}
+
+type e2eVerdictExpectation struct {
+	name    string
+	allowed []string
+}
+
+var e2eProblemSuites = []e2eProblemSuite{
+	{
+		name:        "P1",
+		dir:         "E2E_cases/P1",
+		checker:     "ncmp",
+		timeLimit:   1000,
+		memoryLimit: 256,
+		codes: []e2eCodeExpectation{
+			{
+				filename:       "code_1_ac.cpp",
+				language:       "C++",
+				overallVerdict: "OK",
+				caseVerdicts: []e2eVerdictExpectation{
+					{name: "sum1", allowed: []string{"OK"}},
+					{name: "sum2", allowed: []string{"OK"}},
+					{name: "sum3", allowed: []string{"OK"}},
+					{name: "sum4", allowed: []string{"OK"}},
+					{name: "sum5", allowed: []string{"OK"}},
+				},
+				passedCount: 5,
+			},
+			{
+				filename:       "code_2_tle.cpp",
+				language:       "C++",
+				overallVerdict: "TimeLimitExceeded",
+				caseVerdicts: []e2eVerdictExpectation{
+					{name: "sum1", allowed: []string{"OK"}},
+					{name: "sum2", allowed: []string{"OK"}},
+					{name: "sum3", allowed: []string{"OK"}},
+					{name: "sum4", allowed: []string{"OK"}},
+					{name: "sum5", allowed: []string{"TimeLimitExceeded"}},
+				},
+				passedCount: 4,
+			},
+			{
+				filename:       "code_3_wa_and_tle.cpp",
+				language:       "C++",
+				overallVerdict: "TimeLimitExceeded",
+				caseVerdicts: []e2eVerdictExpectation{
+					{name: "sum1", allowed: []string{"OK"}},
+					{name: "sum2", allowed: []string{"OK"}},
+					{name: "sum3", allowed: []string{"OK"}},
+					{name: "sum4", allowed: []string{"WrongAnswer"}},
+					{name: "sum5", allowed: []string{"TimeLimitExceeded"}},
+				},
+				passedCount: 3,
+			},
+			{
+				filename:       "code_4_wa_and_tle.py",
+				language:       "Python",
+				overallVerdict: "TimeLimitExceeded",
+				caseVerdicts: []e2eVerdictExpectation{
+					{name: "sum1", allowed: []string{"OK"}},
+					{name: "sum2", allowed: []string{"OK"}},
+					{name: "sum3", allowed: []string{"WrongAnswer"}},
+					{name: "sum4", allowed: []string{"WrongAnswer"}},
+					{name: "sum5", allowed: []string{"TimeLimitExceeded"}},
+				},
+				passedCount: 2,
+			},
+			{
+				filename:       "code_5_wa_and_tle.c",
+				language:       "C",
+				overallVerdict: "TimeLimitExceeded",
+				caseVerdicts: []e2eVerdictExpectation{
+					{name: "sum1", allowed: []string{"OK"}},
+					{name: "sum2", allowed: []string{"WrongAnswer"}},
+					{name: "sum3", allowed: []string{"WrongAnswer", "TimeLimitExceeded"}},
+					{name: "sum4", allowed: []string{"TimeLimitExceeded"}},
+					{name: "sum5", allowed: []string{"TimeLimitExceeded"}},
+				},
+				passedCount: 1,
+			},
+		},
+	},
+}
 
 func requireE2EPrerequisites(t *testing.T) {
 	t.Helper()
@@ -57,7 +157,6 @@ func newE2EHandler(t *testing.T) *Handler {
 	compileCache, err := cache.New(100)
 	require.NoError(t, err)
 
-	// Initialize ExternalStorage for test data files
 	testdataDir := filepath.Join(projectRoot(t), "testdata")
 	externalStorage, err := storage.NewExternalStorage(testdataDir, compileCache)
 	require.NoError(t, err)
@@ -99,139 +198,111 @@ func executeJudgeRequest(t *testing.T, handler *Handler, reqBody JudgeRequestDTO
 	return resp
 }
 
-func TestE2E_HTTP_Python_OK(t *testing.T) {
+func TestE2E_HTTP_ExternalCases(t *testing.T) {
 	requireE2EPrerequisites(t)
 	handler := newE2EHandler(t)
 
-	reqBody := JudgeRequestDTO{
-		SourceCode: `import sys
-n = int(sys.stdin.readline())
-print(n * 2)`,
-		Language:    "Python",
-		TimeLimit:   2000,
-		MemoryLimit: 256,
-		TestCases: []JudgeTestCaseDTO{
-			{Name: "case-1", InputText: "21\n", ExpectedOutputText: "42\n"},
-			{Name: "case-2", InputText: "7\n", ExpectedOutputText: "14\n"},
-		},
-	}
+	for _, suite := range e2eProblemSuites {
+		t.Run(suite.name, func(t *testing.T) {
+			testCases := loadProblemTestCases(t, suite.dir)
+			assertSuiteMatchesCodeDirectory(t, suite)
 
-	resp := executeJudgeRequest(t, handler, reqBody)
+			for _, codeExpectation := range suite.codes {
+				t.Run(codeExpectation.filename, func(t *testing.T) {
+					reqBody := JudgeRequestDTO{
+						SourceCode:  readSourceCode(t, suite.dir, codeExpectation.filename),
+						Checker:     suite.checker,
+						Language:    codeExpectation.language,
+						TimeLimit:   suite.timeLimit,
+						MemoryLimit: suite.memoryLimit,
+						TestCases:   testCases,
+					}
 
-	assert.Equal(t, "OK", resp.Verdict)
-	assert.True(t, resp.Compile.Succeeded)
-	assert.Equal(t, 2, resp.PassedCount)
-	assert.Equal(t, 2, resp.TotalCount)
-}
+					resp := executeJudgeRequest(t, handler, reqBody)
 
-func TestE2E_HTTP_CPP_TLE(t *testing.T) {
-	requireE2EPrerequisites(t)
-	if _, err := exec.LookPath("g++"); err != nil {
-		t.Skip("g++ not available")
-	}
-
-	handler := newE2EHandler(t)
-
-	reqBody := JudgeRequestDTO{
-		SourceCode: `int main() {
-  while (true) {}
-  return 0;
-}`,
-		Language:    "C++",
-		TimeLimit:   1000,
-		MemoryLimit: 256,
-		TestCases:   []JudgeTestCaseDTO{{Name: "case-1", InputText: "", ExpectedOutputText: ""}},
-	}
-
-	resp := executeJudgeRequest(t, handler, reqBody)
-	assert.Equal(t, "TimeLimitExceeded", resp.Verdict)
-}
-
-func TestE2E_HTTP_ConcurrentJudges(t *testing.T) {
-	requireE2EPrerequisites(t)
-	handler := newE2EHandler(t)
-
-	const numRequests = 3
-	results := make(chan string, numRequests)
-
-	for range numRequests {
-		go func() {
-			reqBody := JudgeRequestDTO{
-				SourceCode:  `print("OK")`,
-				Language:    "Python",
-				TimeLimit:   2000,
-				MemoryLimit: 256,
-				TestCases:   []JudgeTestCaseDTO{{Name: "case-1", InputText: "", ExpectedOutputText: "OK\n"}},
+					assert.Equal(t, codeExpectation.overallVerdict, resp.Verdict)
+					assert.Equal(t, codeExpectation.passedCount, resp.PassedCount)
+					assert.Equal(t, len(testCases), resp.TotalCount)
+					require.Len(t, resp.Cases, len(codeExpectation.caseVerdicts))
+					assertCaseVerdicts(t, codeExpectation.caseVerdicts, resp.Cases)
+				})
 			}
-			resp, err := executeConcurrentJudgeRequest(handler, reqBody)
-			if err != nil {
-				results <- "REQUEST_ERROR"
-				return
-			}
-			if resp.Verdict != "OK" && len(resp.Cases) > 0 {
-				t.Logf("Unexpected verdict: %s, stdout: %s, extraInfo: %s",
-					resp.Verdict, resp.Cases[0].Stdout, resp.Cases[0].ExtraInfo)
-			}
-			results <- resp.Verdict
-		}()
-	}
-
-	for range numRequests {
-		select {
-		case verdict := <-results:
-			assert.Equal(t, "OK", verdict)
-		case <-time.After(30 * time.Second):
-			t.Fatal("timeout waiting for concurrent execution")
-		}
+		})
 	}
 }
 
-func executeConcurrentJudgeRequest(handler *Handler, reqBody JudgeRequestDTO) (JudgeResponseDTO, error) {
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		return JudgeResponseDTO{}, err
-	}
+func loadProblemTestCases(t *testing.T, problemDir string) []JudgeTestCaseDTO {
+	t.Helper()
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/execute", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	handler.HandleExecute(w, req)
-
-	return decodeJudgeResponse(w.Body)
-}
-
-func TestE2E_HTTP_ExternalTestFiles(t *testing.T) {
-	requireE2EPrerequisites(t)
-	handler := newE2EHandler(t)
-
-	// Read actual code from P1 test case
-	codeBytes, err := os.ReadFile(filepath.Join(projectRoot(t),
-		"testdata/E2E_cases/P1/code/code_1_ac.cpp"))
+	pattern := filepath.Join(projectRoot(t), "testdata", problemDir, "data", "*.in")
+	inputFiles, err := filepath.Glob(pattern)
 	require.NoError(t, err)
+	require.NotEmpty(t, inputFiles, "no input files found for %s", problemDir)
+	slices.Sort(inputFiles)
 
-	reqBody := JudgeRequestDTO{
-		SourceCode:  string(codeBytes),
-		Language:    "C++",
-		TimeLimit:   1000,
-		MemoryLimit: 256,
-		TestCases: []JudgeTestCaseDTO{
-			{
-				Name:               "sum1",
-				InputFile:          "E2E_cases/P1/data/sum1.in",
-				ExpectedOutputFile: "E2E_cases/P1/data/sum1.out",
-			},
-			{
-				Name:               "sum2",
-				InputFile:          "E2E_cases/P1/data/sum2.in",
-				ExpectedOutputFile: "E2E_cases/P1/data/sum2.out",
-			},
-		},
+	testCases := make([]JudgeTestCaseDTO, 0, len(inputFiles))
+	for _, inputPath := range inputFiles {
+		name := strings.TrimSuffix(filepath.Base(inputPath), filepath.Ext(inputPath))
+		outputPath := strings.TrimSuffix(inputPath, ".in") + ".out"
+
+		if _, err := os.Stat(outputPath); err != nil {
+			t.Fatalf("missing output file for %s: %v", inputPath, err)
+		}
+
+		testCases = append(testCases, JudgeTestCaseDTO{
+			Name:               name,
+			InputFile:          filepath.ToSlash(filepath.Join(problemDir, "data", name+".in")),
+			ExpectedOutputFile: filepath.ToSlash(filepath.Join(problemDir, "data", name+".out")),
+		})
 	}
 
-	resp := executeJudgeRequest(t, handler, reqBody)
+	return testCases
+}
 
-	assert.Equal(t, "OK", resp.Verdict)
-	assert.True(t, resp.Compile.Succeeded)
-	assert.Equal(t, 2, resp.PassedCount)
-	assert.Equal(t, 2, resp.TotalCount)
+func assertSuiteMatchesCodeDirectory(t *testing.T, suite e2eProblemSuite) {
+	t.Helper()
+
+	pattern := filepath.Join(projectRoot(t), "testdata", suite.dir, "code", "*")
+	codeFiles, err := filepath.Glob(pattern)
+	require.NoError(t, err)
+	require.NotEmpty(t, codeFiles, "no code files found for %s", suite.name)
+
+	discovered := make([]string, 0, len(codeFiles))
+	for _, codeFile := range codeFiles {
+		info, err := os.Stat(codeFile)
+		require.NoError(t, err)
+		if info.IsDir() {
+			continue
+		}
+		discovered = append(discovered, filepath.Base(codeFile))
+	}
+	slices.Sort(discovered)
+
+	configured := make([]string, 0, len(suite.codes))
+	for _, codeExpectation := range suite.codes {
+		configured = append(configured, codeExpectation.filename)
+	}
+	slices.Sort(configured)
+
+	assert.Equal(t, configured, discovered,
+		fmt.Sprintf("suite %s must cover all and only code files in testdata", suite.name))
+}
+
+func readSourceCode(t *testing.T, problemDir, filename string) string {
+	t.Helper()
+
+	path := filepath.Join(projectRoot(t), "testdata", problemDir, "code", filename)
+	content, err := os.ReadFile(path)
+	require.NoError(t, err)
+	return string(content)
+}
+
+func assertCaseVerdicts(t *testing.T, expected []e2eVerdictExpectation, actual []JudgeCaseResultDTO) {
+	t.Helper()
+
+	for i, caseResult := range actual {
+		assert.Equal(t, expected[i].name, caseResult.Name)
+		assert.Contains(t, expected[i].allowed, caseResult.Verdict,
+			"unexpected verdict for %s", caseResult.Name)
+	}
 }

@@ -37,7 +37,9 @@
 | code_2_tle.cpp        | TLE 代码，`O(n)` 复杂度                    | AC    | AC    | AC    | AC    | TLE   |
 | code_3_wa_and_tle.cpp | 相比于 code_2，多了一个 int 乘法溢出的错误 | AC    | AC    | AC    | WA    | TLE   |
 | code_4_wa_and_tle.py  | 相比于 code_2，错误使用浮点除法而出错      | AC    | AC    | WA    | WA    | TLE   |
-| code_5_wa_and_tle.c   | 纯粹的暴力                                 | AC    | WA    | TLE   | TLE   | TLE   |
+| code_5_wa_and_tle.c   | 纯粹的暴力                                 | AC    | WA    | WA/TLE | TLE   | TLE   |
+
+`code_5_wa_and_tle.c` 在 Test3 属于边界点：较快的机器上可能先跑出错误结果（WA），较慢的机器上可能先超时（TLE）。
 
 ## 测试目的
 
