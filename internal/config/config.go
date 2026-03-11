@@ -27,9 +27,7 @@ type Config struct {
 	DefaultChecker string
 
 	// Security
-	EnableAuth     bool
-	APIKeys        []string
-	AllowedOrigins []string
+	APIKeys []string
 
 	// Observability
 	LogLevel string
@@ -54,9 +52,7 @@ func Load() *Config {
 		DefaultChecker: getEnv("DEFAULT_CHECKER", "default"),
 
 		// Security
-		EnableAuth:     getEnvBool("ENABLE_AUTH", false),
-		APIKeys:        getEnvSlice("API_KEYS", []string{}),
-		AllowedOrigins: getEnvSlice("ALLOWED_ORIGINS", []string{"*"}),
+		APIKeys: getEnvSlice("API_KEYS", []string{}),
 
 		// Observability
 		LogLevel: getEnv("LOG_LEVEL", "info"),
@@ -81,16 +77,6 @@ func getEnvInt(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		if intVal, err := strconv.Atoi(value); err == nil {
 			return intVal
-		}
-	}
-	return defaultValue
-}
-
-// getEnvBool retrieves a boolean environment variable or returns a default value.
-func getEnvBool(key string, defaultValue bool) bool {
-	if value := os.Getenv(key); value != "" {
-		if boolVal, err := strconv.ParseBool(value); err == nil {
-			return boolVal
 		}
 	}
 	return defaultValue

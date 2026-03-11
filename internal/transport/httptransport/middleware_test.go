@@ -2,6 +2,7 @@ package httptransport
 
 import (
 	"bytes"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -9,9 +10,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// TestLoggingMiddleware tests the logging middleware.
 func TestLoggingMiddleware(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -47,8 +48,7 @@ func TestLoggingMiddleware(t *testing.T) {
 				w.WriteHeader(tt.handlerStatus)
 			})
 
-			middleware := LoggingMiddleware(logger)
-			wrapped := middleware(handler)
+			wrapped := LoggingMiddleware(logger)(handler)
 
 			req := httptest.NewRequest(tt.method, tt.path, nil)
 			req.RemoteAddr = "127.0.0.1:12345"
@@ -75,24 +75,20 @@ func TestLoggingMiddleware_DefaultStatusCode(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
 
-	// Handler that doesn't explicitly call WriteHeader
 	handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
 
-	middleware := LoggingMiddleware(logger)
-	wrapped := middleware(handler)
+	wrapped := LoggingMiddleware(logger)(handler)
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	w := httptest.NewRecorder()
 
 	wrapped.ServeHTTP(w, req)
 
-	logOutput := logBuf.String()
-	assert.Contains(t, logOutput, "status=200")
+	assert.Contains(t, logBuf.String(), "status=200")
 }
 
-// TestRecoveryMiddleware tests the panic recovery middleware.
 func TestRecoveryMiddleware(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -128,8 +124,7 @@ func TestRecoveryMiddleware(t *testing.T) {
 				_, _ = w.Write([]byte("success"))
 			})
 
-			middleware := RecoveryMiddleware(logger)
-			wrapped := middleware(handler)
+			wrapped := RecoveryMiddleware(logger)(handler)
 
 			req := httptest.NewRequest(http.MethodGet, "/test", nil)
 			w := httptest.NewRecorder()
@@ -140,11 +135,11 @@ func TestRecoveryMiddleware(t *testing.T) {
 
 			if tt.shouldPanic {
 				assert.Contains(t, w.Body.String(), tt.expectedBody)
-				logOutput := logBuf.String()
-				assert.Contains(t, logOutput, "panic recovered")
-			} else {
-				assert.Contains(t, w.Body.String(), "success")
+				assert.Contains(t, logBuf.String(), "panic recovered")
+				return
 			}
+
+			assert.Contains(t, w.Body.String(), "success")
 		})
 	}
 }
@@ -163,16 +158,13 @@ func TestRecoveryMiddleware_SubsequentRequests(t *testing.T) {
 		_, _ = w.Write([]byte("ok"))
 	})
 
-	middleware := RecoveryMiddleware(logger)
-	wrapped := middleware(handler)
+	wrapped := RecoveryMiddleware(logger)(handler)
 
-	// First request panics
 	req1 := httptest.NewRequest(http.MethodGet, "/test", nil)
 	w1 := httptest.NewRecorder()
 	wrapped.ServeHTTP(w1, req1)
 	assert.Equal(t, http.StatusInternalServerError, w1.Code)
 
-	// Second request succeeds
 	req2 := httptest.NewRequest(http.MethodGet, "/test", nil)
 	w2 := httptest.NewRecorder()
 	wrapped.ServeHTTP(w2, req2)
@@ -180,119 +172,50 @@ func TestRecoveryMiddleware_SubsequentRequests(t *testing.T) {
 	assert.Contains(t, w2.Body.String(), "ok")
 }
 
-// TestTimeoutMiddleware tests the timeout middleware.
-func TestTimeoutMiddleware(t *testing.T) {
-	tests := []struct {
-		name          string
-		timeout       time.Duration
-		handlerDelay  time.Duration
-		expectTimeout bool
-	}{
-		{
-			name:          "request completes within timeout",
-			timeout:       100 * time.Millisecond,
-			handlerDelay:  10 * time.Millisecond,
-			expectTimeout: false,
-		},
-		{
-			name:          "zero timeout still works",
-			timeout:       0,
-			handlerDelay:  0,
-			expectTimeout: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if tt.handlerDelay > 0 {
-					time.Sleep(tt.handlerDelay)
-				}
-
-				// Check if context is still valid
-				select {
-				case <-r.Context().Done():
-					return
-				default:
-					w.WriteHeader(http.StatusOK)
-					_, _ = w.Write([]byte("ok"))
-				}
-			})
-
-			middleware := TimeoutMiddleware(tt.timeout)
-			wrapped := middleware(handler)
-
-			req := httptest.NewRequest(http.MethodGet, "/test", nil)
-			w := httptest.NewRecorder()
-
-			wrapped.ServeHTTP(w, req)
-
-			if !tt.expectTimeout {
-				assert.Equal(t, http.StatusOK, w.Code)
-			}
-		})
-	}
-}
-
-func TestTimeoutMiddleware_ContextPropagation(t *testing.T) {
-	var receivedDeadline time.Time
-	var hasDeadline bool
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		receivedDeadline, hasDeadline = r.Context().Deadline()
-		w.WriteHeader(http.StatusOK)
-	})
-
-	timeout := 1 * time.Second
-	middleware := TimeoutMiddleware(timeout)
-	wrapped := middleware(handler)
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	w := httptest.NewRecorder()
-
-	wrapped.ServeHTTP(w, req)
-
-	assert.True(t, hasDeadline, "context should have deadline")
-	assert.WithinDuration(t, time.Now().Add(timeout), receivedDeadline, 100*time.Millisecond)
-}
-
-// TestAuthMiddleware tests the authentication middleware.
-//
-//nolint:funlen // Comprehensive matrix for middleware behavior.
 func TestAuthMiddleware(t *testing.T) {
 	tests := []struct {
-		name         string
-		apiKeys      []string
-		authHeader   string
-		expectedCode int
-		expectedBody string
+		name          string
+		apiKeys       []string
+		authHeader    string
+		expectedCode  int
+		expectedError ErrorResponseDTO
 	}{
 		{
 			name:         "no api keys allows all requests",
 			apiKeys:      []string{},
-			authHeader:   "",
 			expectedCode: http.StatusOK,
 		},
 		{
 			name:         "missing auth header returns 401",
 			apiKeys:      []string{"valid-key"},
-			authHeader:   "",
 			expectedCode: http.StatusUnauthorized,
-			expectedBody: "Missing Authorization header",
+			expectedError: ErrorResponseDTO{
+				Error:   http.StatusText(http.StatusUnauthorized),
+				Code:    "UNAUTHORIZED",
+				Details: "missing Authorization header",
+			},
 		},
 		{
 			name:         "invalid format returns 401",
 			apiKeys:      []string{"valid-key"},
 			authHeader:   "InvalidFormat token",
 			expectedCode: http.StatusUnauthorized,
-			expectedBody: "Invalid Authorization format",
+			expectedError: ErrorResponseDTO{
+				Error:   http.StatusText(http.StatusUnauthorized),
+				Code:    "UNAUTHORIZED",
+				Details: "Authorization header must use Bearer token",
+			},
 		},
 		{
 			name:         "invalid api key returns 401",
 			apiKeys:      []string{"valid-key"},
 			authHeader:   "Bearer invalid-key",
 			expectedCode: http.StatusUnauthorized,
-			expectedBody: "Invalid API key",
+			expectedError: ErrorResponseDTO{
+				Error:   http.StatusText(http.StatusUnauthorized),
+				Code:    "UNAUTHORIZED",
+				Details: "invalid API key",
+			},
 		},
 		{
 			name:         "valid api key allows request",
@@ -311,19 +234,25 @@ func TestAuthMiddleware(t *testing.T) {
 			apiKeys:      []string{"valid-key"},
 			authHeader:   "Bearer ",
 			expectedCode: http.StatusUnauthorized,
-			expectedBody: "Invalid API key",
+			expectedError: ErrorResponseDTO{
+				Error:   http.StatusText(http.StatusUnauthorized),
+				Code:    "UNAUTHORIZED",
+				Details: "invalid API key",
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			var logBuf bytes.Buffer
+			logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+
 			handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write([]byte("success"))
 			})
 
-			middleware := AuthMiddleware(tt.apiKeys)
-			wrapped := middleware(handler)
+			wrapped := AuthMiddleware(logger, tt.apiKeys)(handler)
 
 			req := httptest.NewRequest(http.MethodGet, "/test", nil)
 			if tt.authHeader != "" {
@@ -335,112 +264,17 @@ func TestAuthMiddleware(t *testing.T) {
 
 			assert.Equal(t, tt.expectedCode, w.Code)
 
-			if tt.expectedBody != "" {
-				assert.Contains(t, w.Body.String(), tt.expectedBody)
-			} else if tt.expectedCode == http.StatusOK {
+			if tt.expectedCode == http.StatusOK {
 				assert.Contains(t, w.Body.String(), "success")
-			}
-		})
-	}
-}
-
-// TestCORSMiddleware tests the CORS middleware.
-//
-//nolint:funlen // Comprehensive matrix for middleware behavior.
-func TestCORSMiddleware(t *testing.T) {
-	tests := []struct {
-		name           string
-		allowedOrigins []string
-		requestOrigin  string
-		method         string
-		expectCORS     bool
-		expectedOrigin string
-	}{
-		{
-			name:           "wildcard origin allows all",
-			allowedOrigins: []string{"*"},
-			requestOrigin:  "https://example.com",
-			method:         http.MethodGet,
-			expectCORS:     true,
-			expectedOrigin: "https://example.com",
-		},
-		{
-			name:           "specific origin allowed",
-			allowedOrigins: []string{"https://example.com"},
-			requestOrigin:  "https://example.com",
-			method:         http.MethodGet,
-			expectCORS:     true,
-			expectedOrigin: "https://example.com",
-		},
-		{
-			name:           "specific origin denied",
-			allowedOrigins: []string{"https://example.com"},
-			requestOrigin:  "https://evil.com",
-			method:         http.MethodGet,
-			expectCORS:     false,
-		},
-		{
-			name:           "missing origin with wildcard",
-			allowedOrigins: []string{"*"},
-			requestOrigin:  "",
-			method:         http.MethodGet,
-			expectCORS:     true,
-			expectedOrigin: "*",
-		},
-		{
-			name:           "missing origin without wildcard",
-			allowedOrigins: []string{"https://example.com"},
-			requestOrigin:  "",
-			method:         http.MethodGet,
-			expectCORS:     false,
-		},
-		{
-			name:           "preflight request",
-			allowedOrigins: []string{"*"},
-			requestOrigin:  "https://example.com",
-			method:         http.MethodOptions,
-			expectCORS:     true,
-			expectedOrigin: "https://example.com",
-		},
-		{
-			name:           "multiple allowed origins",
-			allowedOrigins: []string{"https://example.com", "https://test.com"},
-			requestOrigin:  "https://test.com",
-			method:         http.MethodPost,
-			expectCORS:     true,
-			expectedOrigin: "https://test.com",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte("ok"))
-			})
-
-			middleware := CORSMiddleware(tt.allowedOrigins)
-			wrapped := middleware(handler)
-
-			req := httptest.NewRequest(tt.method, "/test", nil)
-			if tt.requestOrigin != "" {
-				req.Header.Set("Origin", tt.requestOrigin)
-			}
-			w := httptest.NewRecorder()
-
-			wrapped.ServeHTTP(w, req)
-
-			if tt.expectCORS {
-				assert.Equal(t, tt.expectedOrigin, w.Header().Get("Access-Control-Allow-Origin"))
-				assert.NotEmpty(t, w.Header().Get("Access-Control-Allow-Methods"))
-				assert.NotEmpty(t, w.Header().Get("Access-Control-Allow-Headers"))
-			} else {
-				assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
+				return
 			}
 
-			if tt.method == http.MethodOptions {
-				assert.Equal(t, http.StatusOK, w.Code)
-			}
+			assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+
+			var resp ErrorResponseDTO
+			err := json.NewDecoder(w.Body).Decode(&resp)
+			require.NoError(t, err)
+			assert.Equal(t, tt.expectedError, resp)
 		})
 	}
 }

@@ -1,7 +1,7 @@
 package httptransport
 
 import (
-	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -49,21 +49,8 @@ func RecoveryMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
 	}
 }
 
-// TimeoutMiddleware adds a timeout to requests.
-func TimeoutMiddleware(timeout time.Duration) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx, cancel := context.WithTimeout(r.Context(), timeout)
-			defer cancel()
-
-			r = r.WithContext(ctx)
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
 // AuthMiddleware validates API keys.
-func AuthMiddleware(apiKeys []string) func(http.Handler) http.Handler {
+func AuthMiddleware(logger *slog.Logger, apiKeys []string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if len(apiKeys) == 0 {
@@ -73,50 +60,20 @@ func AuthMiddleware(apiKeys []string) func(http.Handler) http.Handler {
 
 			auth := r.Header.Get("Authorization")
 			if auth == "" {
-				http.Error(w, "Missing Authorization header", http.StatusUnauthorized)
+				writeErrorResponse(w, logger, http.StatusUnauthorized, "UNAUTHORIZED", "missing Authorization header")
 				return
 			}
 
 			// Extract Bearer token
 			token := strings.TrimPrefix(auth, "Bearer ")
 			if token == auth {
-				http.Error(w, "Invalid Authorization format", http.StatusUnauthorized)
+				writeErrorResponse(w, logger, http.StatusUnauthorized, "UNAUTHORIZED", "Authorization header must use Bearer token")
 				return
 			}
 
 			// Validate token
 			if !slices.Contains(apiKeys, token) {
-				http.Error(w, "Invalid API key", http.StatusUnauthorized)
-				return
-			}
-
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// CORSMiddleware adds CORS headers.
-func CORSMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			origin := r.Header.Get("Origin")
-
-			// Check if origin is allowed
-			allowed := slices.Contains(allowedOrigins, "*") || slices.Contains(allowedOrigins, origin)
-
-			if allowed {
-				if origin != "" {
-					w.Header().Set("Access-Control-Allow-Origin", origin)
-				} else {
-					w.Header().Set("Access-Control-Allow-Origin", "*")
-				}
-				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-				w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-			}
-
-			// Handle preflight
-			if r.Method == http.MethodOptions {
-				w.WriteHeader(http.StatusOK)
+				writeErrorResponse(w, logger, http.StatusUnauthorized, "UNAUTHORIZED", "invalid API key")
 				return
 			}
 
@@ -134,4 +91,17 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+func writeErrorResponse(w http.ResponseWriter, logger *slog.Logger, status int, code, details string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+
+	if err := json.NewEncoder(w).Encode(ErrorResponseDTO{
+		Error:   http.StatusText(status),
+		Code:    code,
+		Details: details,
+	}); err != nil && logger != nil {
+		logger.Error("failed to encode response", "error", err)
+	}
 }

@@ -22,6 +22,7 @@ go build -o server ./cmd/server
 # 调用评测 API
 curl -X POST http://localhost:8080/v1/execute \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-api-key" \
   -d '{
     "sourceCode": "import sys\\nn=int(sys.stdin.readline())\\nprint(n*2)",
     "checker": "default",
@@ -138,9 +139,7 @@ GET /health
 | `MAX_INPUT_SIZE_MB` | `256` | 最大请求体限制 |
 | `DEFAULT_CHECKER` | `default` | 未指定 `checker` 时使用的默认内置 checker |
 | `ALLOWED_CHECKERS` | `default,ncmp,wcmp,fcmp,yesno,nyesno,lcmp,hcmp,rcmp4,rcmp6,rcmp9` | 允许请求选择的 checker 短名列表（逗号分隔） |
-| `ENABLE_AUTH` | `false` | 启用 API Key 认证 |
-| `API_KEYS` | - | API Key 列表（逗号分隔） |
-| `ALLOWED_ORIGINS` | `*` | CORS 允许来源 |
+| `API_KEYS` | - | API Key 列表（逗号分隔）；非空时自动启用 Bearer Token 鉴权 |
 | `LOG_LEVEL` | `info` | 日志级别 |
 
 ## 开发

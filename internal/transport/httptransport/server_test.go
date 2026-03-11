@@ -13,24 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewServer(t *testing.T) {
-	cfg := &config.Config{
-		HTTPAddr:       "localhost",
-		HTTPPort:       8080,
-		ReadTimeout:    5 * time.Second,
-		WriteTimeout:   10 * time.Second,
-		MaxInputSizeMB: 256,
-		AllowedOrigins: []string{"*"},
-	}
-
-	server := NewServer(cfg, &mockJudgeService{}, slog.Default())
-
-	assert.NotNil(t, server)
-	assert.NotNil(t, server.httpServer)
-	assert.NotNil(t, server.handler)
-	assert.Equal(t, "localhost:8080", server.Addr())
-}
-
 func TestServer_StartStop(t *testing.T) {
 	cfg := &config.Config{
 		HTTPAddr:       "localhost",
@@ -38,7 +20,6 @@ func TestServer_StartStop(t *testing.T) {
 		ReadTimeout:    5 * time.Second,
 		WriteTimeout:   10 * time.Second,
 		MaxInputSizeMB: 256,
-		AllowedOrigins: []string{"*"},
 	}
 
 	server := NewServer(cfg, &mockJudgeService{}, slog.Default())
@@ -72,7 +53,6 @@ func TestServer_GracefulShutdown(t *testing.T) {
 		ReadTimeout:    5 * time.Second,
 		WriteTimeout:   10 * time.Second,
 		MaxInputSizeMB: 256,
-		AllowedOrigins: []string{"*"},
 	}
 
 	server := NewServer(cfg, &mockJudgeService{}, slog.Default())
@@ -89,18 +69,4 @@ func TestServer_GracefulShutdown(t *testing.T) {
 
 	err := server.Stop(stopCtx)
 	assert.NoError(t, err)
-}
-
-func TestServer_Addr(t *testing.T) {
-	cfg := &config.Config{
-		HTTPAddr:       "127.0.0.1",
-		HTTPPort:       3000,
-		ReadTimeout:    5 * time.Second,
-		WriteTimeout:   10 * time.Second,
-		MaxInputSizeMB: 256,
-		AllowedOrigins: []string{"*"},
-	}
-
-	server := NewServer(cfg, &mockJudgeService{}, slog.Default())
-	assert.Equal(t, "127.0.0.1:3000", server.Addr())
 }

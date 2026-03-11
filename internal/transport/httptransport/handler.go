@@ -86,9 +86,5 @@ func (h *Handler) writeJSON(w http.ResponseWriter, status int, data any) {
 
 // writeError writes an error response.
 func (h *Handler) writeError(w http.ResponseWriter, status int, code, details string) {
-	h.writeJSON(w, status, ErrorResponseDTO{
-		Error:   http.StatusText(status),
-		Code:    code,
-		Details: details,
-	})
+	writeErrorResponse(w, h.logger, status, code, details)
 }

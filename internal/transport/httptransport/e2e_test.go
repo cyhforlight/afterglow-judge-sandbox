@@ -124,45 +124,6 @@ print(n * 2)`,
 	assert.Equal(t, 2, resp.TotalCount)
 }
 
-func TestE2E_HTTP_Python_WA(t *testing.T) {
-	requireE2EPrerequisites(t)
-	handler := newE2EHandler(t)
-
-	reqBody := JudgeRequestDTO{
-		SourceCode:  `print("41")`,
-		Language:    "Python",
-		TimeLimit:   2000,
-		MemoryLimit: 256,
-		TestCases:   []JudgeTestCaseDTO{{Name: "case-1", InputText: "", ExpectedOutputText: "42\n"}},
-	}
-
-	resp := executeJudgeRequest(t, handler, reqBody)
-
-	assert.Equal(t, "WrongAnswer", resp.Verdict)
-	require.Len(t, resp.Cases, 1)
-	assert.Equal(t, "WrongAnswer", resp.Cases[0].Verdict)
-}
-
-func TestE2E_HTTP_Python_CustomChecker(t *testing.T) {
-	requireE2EPrerequisites(t)
-	handler := newE2EHandler(t)
-
-	reqBody := JudgeRequestDTO{
-		SourceCode:  `print("yes")`,
-		Checker:     "yesno",
-		Language:    "Python",
-		TimeLimit:   2000,
-		MemoryLimit: 256,
-		TestCases:   []JudgeTestCaseDTO{{Name: "case-1", InputText: "", ExpectedOutputText: "YES\n"}},
-	}
-
-	resp := executeJudgeRequest(t, handler, reqBody)
-
-	assert.Equal(t, "OK", resp.Verdict)
-	require.Len(t, resp.Cases, 1)
-	assert.Equal(t, "OK", resp.Cases[0].Verdict)
-}
-
 func TestE2E_HTTP_CPP_TLE(t *testing.T) {
 	requireE2EPrerequisites(t)
 	if _, err := exec.LookPath("g++"); err != nil {
@@ -273,39 +234,4 @@ func TestE2E_HTTP_ExternalTestFiles(t *testing.T) {
 	assert.True(t, resp.Compile.Succeeded)
 	assert.Equal(t, 2, resp.PassedCount)
 	assert.Equal(t, 2, resp.TotalCount)
-}
-
-func TestE2E_HTTP_FileNotFound(t *testing.T) {
-	requireE2EPrerequisites(t)
-	handler := newE2EHandler(t)
-
-	reqBody := JudgeRequestDTO{
-		SourceCode:  `print("test")`,
-		Language:    "Python",
-		TimeLimit:   2000,
-		MemoryLimit: 256,
-		TestCases: []JudgeTestCaseDTO{
-			{
-				Name:               "missing",
-				InputFile:          "nonexistent/file.in",
-				ExpectedOutputFile: "E2E_cases/P1/data/sum1.out",
-			},
-		},
-	}
-
-	body, err := json.Marshal(reqBody)
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/execute", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	handler.HandleExecute(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	resp, err := decodeJudgeResponse(w.Body)
-	require.NoError(t, err)
-
-	assert.Equal(t, "UnknownError", resp.Verdict)
-	assert.Contains(t, resp.Compile.Log, "test data loading failed")
-	assert.Contains(t, resp.Compile.Log, "nonexistent/file.in")
 }

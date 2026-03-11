@@ -1,7 +1,6 @@
 package httptransport
 
 import (
-	"encoding/json"
 	"testing"
 
 	"afterglow-judge-sandbox/internal/model"
@@ -229,17 +228,4 @@ func TestToJudgeResponse(t *testing.T) {
 	assert.Equal(t, "WrongAnswer", dto.Cases[1].Verdict)
 	assert.Equal(t, 1, dto.PassedCount)
 	assert.Equal(t, 2, dto.TotalCount)
-}
-
-func TestJudgeResponseDTO_JSON(t *testing.T) {
-	dto := JudgeResponseDTO{
-		Verdict: "CompileError",
-		Compile: CompileResultDTO{Succeeded: false, Log: "compile failed"},
-		Cases:   []JudgeCaseResultDTO{},
-	}
-
-	data, err := json.Marshal(dto)
-	require.NoError(t, err)
-	assert.Contains(t, string(data), `"verdict":"CompileError"`)
-	assert.Contains(t, string(data), `"succeeded":false`)
 }

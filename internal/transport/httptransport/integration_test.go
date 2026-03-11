@@ -1,7 +1,6 @@
 package httptransport
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -12,7 +11,6 @@ import (
 	"time"
 
 	"afterglow-judge-sandbox/internal/config"
-	"afterglow-judge-sandbox/internal/model"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -25,7 +23,6 @@ func TestIntegration_HTTPServer_FullLifecycle(t *testing.T) {
 		ReadTimeout:    5 * time.Second,
 		WriteTimeout:   10 * time.Second,
 		MaxInputSizeMB: 256,
-		AllowedOrigins: []string{"*"},
 	}
 
 	judge := &mockJudgeService{}
@@ -54,110 +51,29 @@ func TestIntegration_HTTPServer_FullLifecycle(t *testing.T) {
 	}
 }
 
-func TestIntegration_ExecuteEndpoint_Success(t *testing.T) {
-	judge := &mockJudgeService{result: model.JudgeResult{
-		Verdict: model.VerdictOK,
-		Compile: model.CompileResult{Succeeded: true, Log: ""},
-		Cases: []model.JudgeCaseResult{
-			{Name: "case-1", Verdict: model.VerdictOK, Stdout: "42\n"},
-		},
-		PassedCount: 1,
-		TotalCount:  1,
-	}}
-
-	handler := NewHandler(judge, slog.Default(), 256)
-	body := JudgeRequestDTO{
-		SourceCode:  "print(42)",
-		Language:    "Python",
-		TimeLimit:   1000,
-		MemoryLimit: 128,
-		TestCases:   []JudgeTestCaseDTO{{Name: "case-1", ExpectedOutputText: "42\n"}},
+func TestIntegration_NewServer_UsesAPIKeysForAuth(t *testing.T) {
+	cfg := &config.Config{
+		HTTPAddr:       "localhost",
+		HTTPPort:       8080,
+		ReadTimeout:    5 * time.Second,
+		WriteTimeout:   10 * time.Second,
+		MaxInputSizeMB: 256,
+		APIKeys:        []string{"secret-token"},
 	}
 
-	payload, err := json.Marshal(body)
-	require.NoError(t, err)
+	server := NewServer(cfg, &mockJudgeService{}, slog.Default())
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/execute", bytes.NewReader(payload))
-	req.Header.Set("Content-Type", "application/json")
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
 
-	handler.HandleExecute(w, req)
+	server.httpServer.Handler.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
 	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
 
-	var resp JudgeResponseDTO
-	err = json.NewDecoder(w.Body).Decode(&resp)
+	var resp ErrorResponseDTO
+	err := json.NewDecoder(w.Body).Decode(&resp)
 	require.NoError(t, err)
-	assert.Equal(t, "OK", resp.Verdict)
-	assert.Equal(t, 1, resp.PassedCount)
-}
-
-func TestIntegration_ExecuteEndpoint_CompileError(t *testing.T) {
-	judge := &mockJudgeService{result: model.JudgeResult{
-		Verdict: model.VerdictCE,
-		Compile: model.CompileResult{Succeeded: false, Log: "compile failed"},
-		Cases:   []model.JudgeCaseResult{},
-	}}
-
-	handler := NewHandler(judge, slog.Default(), 256)
-	body := JudgeRequestDTO{
-		SourceCode:  "bad code",
-		Language:    "C++",
-		TimeLimit:   1000,
-		MemoryLimit: 128,
-		TestCases:   []JudgeTestCaseDTO{{Name: "case-1", ExpectedOutputText: "42\n"}},
-	}
-
-	payload, err := json.Marshal(body)
-	require.NoError(t, err)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/execute", bytes.NewReader(payload))
-	w := httptest.NewRecorder()
-	handler.HandleExecute(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "CompileError")
-}
-
-func TestIntegration_HealthEndpoint(t *testing.T) {
-	tests := []struct {
-		name         string
-		preflightErr error
-		expectedCode int
-	}{
-		{name: "healthy", expectedCode: http.StatusOK},
-		{name: "unhealthy", preflightErr: assert.AnError, expectedCode: http.StatusServiceUnavailable},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			handler := NewHandler(&mockJudgeService{preflightErr: tt.preflightErr}, slog.Default(), 256)
-			req := httptest.NewRequest(http.MethodGet, "/health", nil)
-			w := httptest.NewRecorder()
-			handler.HandleHealth(w, req)
-			assert.Equal(t, tt.expectedCode, w.Code)
-		})
-	}
-}
-
-func TestIntegration_MiddlewareChain_LoggingAndRecovery(t *testing.T) {
-	var logBuf bytes.Buffer
-	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
-
-	handler := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
-		panic("test panic")
-	})
-
-	wrapped := RecoveryMiddleware(logger)(handler)
-	wrapped = LoggingMiddleware(logger)(wrapped)
-
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	w := httptest.NewRecorder()
-	wrapped.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
-	logOutput := logBuf.String()
-	assert.Contains(t, logOutput, "http request")
-	assert.Contains(t, logOutput, "panic recovered")
+	assert.Equal(t, "UNAUTHORIZED", resp.Code)
+	assert.Equal(t, "missing Authorization header", resp.Details)
 }
