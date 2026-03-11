@@ -13,6 +13,8 @@ import (
 )
 
 // InternalStorage implements read-only storage for project-bundled resources.
+// It keeps an in-memory snapshot loaded at initialization time, so later file
+// changes on disk are not observed until the process rebuilds the snapshot.
 // Used for resources like testlib.h, ncmp, rcmp that ship with the project.
 type InternalStorage struct {
 	files map[string][]byte
@@ -20,7 +22,8 @@ type InternalStorage struct {
 
 const bundledSupportDirName = "support"
 
-// NewInternalStorage creates a read-only, in-memory snapshot for internal resources.
+// NewInternalStorage creates a read-only, in-memory snapshot for internal
+// resources. The returned storage does not watch baseDir for later changes.
 func NewInternalStorage(baseDir string) (*InternalStorage, error) {
 	files, err := loadSnapshot(baseDir)
 	if err != nil {
