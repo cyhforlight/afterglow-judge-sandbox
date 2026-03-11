@@ -48,34 +48,18 @@ func TestOKAndChecker_AllTestcases(t *testing.T) {
 			runOut := runUserProgram(t, env, artifact, lang, inputData, 2000, 256)
 			require.Equal(t, sandbox.VerdictOK, runOut.Verdict, "execution failed: %v", runOut.Verdict)
 
-			// Compile checker
+			// Compile and run checker
 			checkerName := checkerNameMap[tcNum]
 			checker := compileCheckerForTestOK(env.ctx, t, checkerName)
-
-			// Run checker
-			checkerRunner := newCheckerRunnerForTestOK(t)
-			checkerReq := CheckerRunRequest{
-				Checker:        checker,
-				InputText:      inputData,
-				ActualOutput:   runOut.Stdout,
-				ExpectedOutput: expectedOutput,
-			}
-			checkerResult, err := checkerRunner.Run(env.ctx, checkerReq)
-			require.NoError(t, err)
+			verdict, message := runCheckerForTest(env.ctx, t, checker, inputData, runOut.Stdout, expectedOutput)
 
 			// Assert expected verdict
 			expectedVerdict := expectedVerdictMap[tcNum]
-			assert.Equal(t, expectedVerdict, checkerResult.Verdict,
+			assert.Equal(t, expectedVerdict, verdict,
 				"testcase-%d: expected %v, got %v (message: %s)",
-				tcNum, expectedVerdict, checkerResult.Verdict, checkerResult.Message)
+				tcNum, expectedVerdict, verdict, message)
 		})
 	}
-}
-
-func newCheckerRunnerForTestOK(t *testing.T) CheckerRunner {
-	t.Helper()
-	sb := sandbox.NewContainerdSandbox("", "")
-	return NewCheckerRunner(NewRunner(sb))
 }
 
 func compileCheckerForTestOK(ctx context.Context, t *testing.T, checkerName string) model.CompiledArtifact {
@@ -108,19 +92,29 @@ func compileCheckerForTestOK(ctx context.Context, t *testing.T, checkerName stri
 	require.NoError(t, err)
 
 	sb := sandbox.NewContainerdSandbox("", "")
-	compiler := NewCheckerCompiler(NewCompiler(sb))
+	compiler := NewCompiler(sb)
 
-	compileReq := CheckerCompileRequest{
-		SourceCode: checkerSource,
-		SupportFiles: []CompileFile{{
-			Name:    "testlib.h",
-			Content: testlibHeader,
-			Mode:    0o644,
-		}},
-	}
-	compileOut, err := compiler.Compile(ctx, compileReq)
+	profile := cppProfile()
+	out, err := compiler.Compile(ctx, CompileRequest{
+		Files: []CompileFile{
+			{Name: checkerSourceFileName, Content: checkerSource, Mode: 0o644},
+			{Name: "testlib.h", Content: testlibHeader, Mode: 0o644},
+		},
+		ImageRef:     profile.Compile.ImageRef,
+		Command:      profile.Compile.BuildCommand(compileMountDir, []string{checkerSourceFileName}),
+		ArtifactName: checkerArtifactFileName,
+		ArtifactMode: profile.Run.FileMode,
+		ArtifactPath: profile.Compile.ArtifactName,
+		Limits: sandbox.ResourceLimits{
+			CPUTimeMs:   profile.Compile.TimeoutMs,
+			WallTimeMs:  profile.Compile.TimeoutMs * sandbox.WallTimeMultiplier,
+			MemoryMB:    profile.Compile.MemoryMB,
+			OutputBytes: sandbox.DefaultCompileOutputLimitBytes,
+		},
+	})
 	require.NoError(t, err)
-	require.True(t, compileOut.Result.Succeeded, "checker compilation failed: %s", compileOut.Result.Log)
+	require.True(t, out.Result.Succeeded, "checker compilation failed: %s", out.Result.Log)
+	out.Artifact.Name = checkerArtifactFileName
 
-	return *compileOut.Artifact
+	return *out.Artifact
 }

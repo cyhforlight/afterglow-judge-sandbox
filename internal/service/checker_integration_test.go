@@ -29,20 +29,6 @@ type checkerScenario struct {
 	failCase checkerCase
 }
 
-func newCheckerCompilerForTest(t *testing.T) CheckerCompiler {
-	t.Helper()
-
-	sb := sandbox.NewContainerdSandbox("", "")
-	return NewCheckerCompiler(NewCompiler(sb))
-}
-
-func newCheckerRunnerForTest(t *testing.T) CheckerRunner {
-	t.Helper()
-
-	sb := sandbox.NewContainerdSandbox("", "")
-	return NewCheckerRunner(NewRunner(sb))
-}
-
 func newInternalResourceStoreForTest(t *testing.T) ResourceStore {
 	t.Helper()
 
@@ -51,6 +37,7 @@ func newInternalResourceStoreForTest(t *testing.T) ResourceStore {
 	return resourceStore
 }
 
+// compileCheckerForTest compiles a builtin checker using Compiler directly.
 func compileCheckerForTest(ctx context.Context, t *testing.T, checkerName string) model.CompiledArtifact {
 	t.Helper()
 
@@ -61,19 +48,93 @@ func compileCheckerForTest(ctx context.Context, t *testing.T, checkerName string
 	testlibHeader, err := resourceStore.Get(ctx, testlibHeaderKey)
 	require.NoError(t, err)
 
-	out, err := newCheckerCompilerForTest(t).Compile(ctx, CheckerCompileRequest{
-		SourceCode: checkerSource,
-		SupportFiles: []CompileFile{{
-			Name:    testlibHeaderKey,
-			Content: testlibHeader,
-			Mode:    0o644,
-		}},
+	sb := sandbox.NewContainerdSandbox("", "")
+	compiler := NewCompiler(sb)
+
+	profile := cppProfile()
+	out, err := compiler.Compile(ctx, CompileRequest{
+		Files: []CompileFile{
+			{Name: checkerSourceFileName, Content: checkerSource, Mode: 0o644},
+			{Name: testlibHeaderKey, Content: testlibHeader, Mode: 0o644},
+		},
+		ImageRef:     profile.Compile.ImageRef,
+		Command:      profile.Compile.BuildCommand(compileMountDir, []string{checkerSourceFileName}),
+		ArtifactName: checkerArtifactFileName,
+		ArtifactMode: profile.Run.FileMode,
+		ArtifactPath: profile.Compile.ArtifactName,
+		Limits: sandbox.ResourceLimits{
+			CPUTimeMs:   profile.Compile.TimeoutMs,
+			WallTimeMs:  profile.Compile.TimeoutMs * sandbox.WallTimeMultiplier,
+			MemoryMB:    profile.Compile.MemoryMB,
+			OutputBytes: sandbox.DefaultCompileOutputLimitBytes,
+		},
 	})
 	require.NoError(t, err)
 	require.True(t, out.Result.Succeeded)
 	require.NotNil(t, out.Artifact)
+	out.Artifact.Name = checkerArtifactFileName
 
 	return *out.Artifact
+}
+
+// runCheckerForTest runs a compiled checker against one testcase using Runner directly.
+func runCheckerForTest(
+	ctx context.Context, t *testing.T,
+	checker model.CompiledArtifact,
+	inputText, actualOutput, expectedOutput string,
+) (model.Verdict, string) {
+	t.Helper()
+
+	sb := sandbox.NewContainerdSandbox("", "")
+	runner := NewRunner(sb)
+
+	profile := cppProfile().Run
+	checkerMode := checker.Mode
+	if checkerMode == 0 {
+		checkerMode = profile.FileMode
+	}
+
+	runOut, err := runner.Run(ctx, RunRequest{
+		Files: []RunFile{
+			{Name: checkerArtifactFileName, Content: checker.Data, Mode: checkerMode},
+			{Name: checkerInputFileName, Content: []byte(inputText), Mode: 0o644},
+			{Name: checkerOutputFileName, Content: []byte(actualOutput), Mode: 0o644},
+			{Name: checkerAnswerFileName, Content: []byte(expectedOutput), Mode: 0o644},
+		},
+		ImageRef: profile.ImageRef,
+		Command: []string{
+			runMountDir + "/" + checkerArtifactFileName,
+			runMountDir + "/" + checkerInputFileName,
+			runMountDir + "/" + checkerOutputFileName,
+			runMountDir + "/" + checkerAnswerFileName,
+		},
+		Cwd:    runMountDir,
+		Limits: checkerRunLimits(),
+	})
+	require.NoError(t, err)
+
+	// Interpret exit code (same logic as JudgeEngine.runChecker)
+	message := strings.TrimSpace(runOut.Stderr)
+	if message == "" {
+		message = strings.TrimSpace(runOut.Stdout)
+	}
+
+	switch runOut.Verdict {
+	case sandbox.VerdictTLE, sandbox.VerdictMLE, sandbox.VerdictOLE:
+		return model.VerdictUKE, message
+	}
+
+	switch runOut.ExitCode {
+	case 0:
+		if runOut.Verdict != sandbox.VerdictOK {
+			return model.VerdictUKE, message
+		}
+		return model.VerdictOK, message
+	case 1, 2:
+		return model.VerdictWA, message
+	default:
+		return model.VerdictUKE, message
+	}
 }
 
 func checkerScenarios() []checkerScenario {
@@ -253,19 +314,12 @@ func TestChecker_AllBundledCheckers(t *testing.T) {
 		t.Run(strings.TrimSuffix(scenario.checker, ".cpp"), func(t *testing.T) {
 			ctx := newIntegrationContext(t, 90*time.Second)
 			checker := compileCheckerForTest(ctx, t, scenario.checker)
-			runner := newCheckerRunnerForTest(t)
 
 			cases := []checkerCase{scenario.okCase, scenario.failCase}
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
-					out, err := runner.Run(ctx, CheckerRunRequest{
-						Checker:        checker,
-						InputText:      tc.inputText,
-						ActualOutput:   tc.actualOutput,
-						ExpectedOutput: tc.expectedOutput,
-					})
-					require.NoError(t, err)
-					assert.Equal(t, tc.wantVerdict, out.Verdict)
+					verdict, _ := runCheckerForTest(ctx, t, checker, tc.inputText, tc.actualOutput, tc.expectedOutput)
+					assert.Equal(t, tc.wantVerdict, verdict)
 				})
 			}
 		})

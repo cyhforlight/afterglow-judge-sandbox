@@ -159,32 +159,6 @@ func TestExternalStorage_Get_PathTraversal(t *testing.T) {
 	assert.Contains(t, err.Error(), "escapes base directory")
 }
 
-func TestExternalStorage_Store_NotSupported(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	storage, err := NewExternalStorage(tmpDir, nil)
-	require.NoError(t, err)
-
-	ctx := context.Background()
-
-	_, err = storage.Store(ctx, "test.txt", []byte("content"))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "read-only")
-}
-
-func TestExternalStorage_StoreWithKey_NotSupported(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	storage, err := NewExternalStorage(tmpDir, nil)
-	require.NoError(t, err)
-
-	ctx := context.Background()
-
-	err = storage.StoreWithKey(ctx, "key", []byte("content"))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "read-only")
-}
-
 func TestExternalStorage_Get_SymlinkEscape_Blocked(t *testing.T) {
 	tmpDir := t.TempDir()
 

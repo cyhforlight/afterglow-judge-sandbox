@@ -107,15 +107,6 @@ type CompiledArtifact struct {
 	Mode os.FileMode
 }
 
-// ExecuteRequest contains parameters for code execution.
-type ExecuteRequest struct {
-	Program     CompiledArtifact `json:"-"`
-	Input       string           `json:"input"`
-	Language    Language         `json:"language"`
-	TimeLimit   int              `json:"timeLimit"`   // milliseconds
-	MemoryLimit int              `json:"memoryLimit"` // megabytes
-}
-
 // ExecuteResult contains the execution outcome and resource usage.
 type ExecuteResult struct {
 	Verdict    Verdict `json:"verdict"`

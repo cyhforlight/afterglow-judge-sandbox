@@ -121,42 +121,6 @@ func TestInternalStorage_SnapshotSurvivesSourceRemoval(t *testing.T) {
 	assert.Equal(t, []byte("checker"), checker)
 }
 
-func TestInternalStorage_Store_ReadOnly(t *testing.T) {
-	tmpDir := t.TempDir()
-	storage, err := NewInternalStorage(tmpDir)
-	require.NoError(t, err)
-
-	ctx := context.Background()
-
-	_, err = storage.Store(ctx, "test", []byte("content"))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "read-only")
-}
-
-func TestInternalStorage_StoreWithKey_ReadOnly(t *testing.T) {
-	tmpDir := t.TempDir()
-	storage, err := NewInternalStorage(tmpDir)
-	require.NoError(t, err)
-
-	ctx := context.Background()
-
-	err = storage.StoreWithKey(ctx, "key", []byte("content"))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "read-only")
-}
-
-func TestInternalStorage_Delete_ReadOnly(t *testing.T) {
-	tmpDir := t.TempDir()
-	storage, err := NewInternalStorage(tmpDir)
-	require.NoError(t, err)
-
-	ctx := context.Background()
-
-	err = storage.Delete(ctx, "key")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "read-only")
-}
-
 func TestSupportDirFromExecutable(t *testing.T) {
 	projectDir := t.TempDir()
 	binDir := filepath.Join(projectDir, "bin")

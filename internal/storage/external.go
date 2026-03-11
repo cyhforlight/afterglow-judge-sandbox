@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -98,21 +97,6 @@ func (s *ExternalStorage) Get(_ context.Context, relPath string) ([]byte, error)
 	}
 
 	return data, nil
-}
-
-// Store is not supported (read-only).
-func (s *ExternalStorage) Store(_ context.Context, _ string, _ []byte) (string, error) {
-	return "", errors.New("ExternalStorage is read-only")
-}
-
-// StoreWithKey is not supported (read-only).
-func (s *ExternalStorage) StoreWithKey(_ context.Context, _ string, _ []byte) error {
-	return errors.New("ExternalStorage is read-only")
-}
-
-// Delete is not supported (read-only).
-func (s *ExternalStorage) Delete(_ context.Context, _ string) error {
-	return errors.New("ExternalStorage is read-only")
 }
 
 // generateCacheKey creates a deterministic cache key from mount point, filepath and mtime.

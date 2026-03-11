@@ -63,21 +63,6 @@ func (s *InternalStorage) Get(_ context.Context, key string) ([]byte, error) {
 	return bytes.Clone(data), nil
 }
 
-// Store is not supported (read-only).
-func (s *InternalStorage) Store(_ context.Context, _ string, _ []byte) (string, error) {
-	return "", errors.New("InternalStorage is read-only")
-}
-
-// StoreWithKey is not supported (read-only).
-func (s *InternalStorage) StoreWithKey(_ context.Context, _ string, _ []byte) error {
-	return errors.New("InternalStorage is read-only")
-}
-
-// Delete is not supported (read-only).
-func (s *InternalStorage) Delete(_ context.Context, _ string) error {
-	return errors.New("InternalStorage is read-only")
-}
-
 func loadSnapshot(baseDir string) (map[string][]byte, error) {
 	info, err := os.Stat(baseDir)
 	if err != nil {
