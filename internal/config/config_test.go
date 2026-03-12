@@ -18,6 +18,7 @@ func TestLoad_Defaults(t *testing.T) {
 	assert.Equal(t, 8080, cfg.HTTPPort)
 	assert.Equal(t, "/run/containerd/containerd.sock", cfg.ContainerdSocket)
 	assert.Equal(t, "default", cfg.DefaultChecker)
+	assert.Equal(t, "/home/forlight/afterglow-judge-engine/testdata", cfg.ExternalDataDir)
 	assert.Empty(t, cfg.APIKey)
 	assert.Equal(t, "info", cfg.LogLevel)
 }
@@ -28,6 +29,7 @@ func TestLoad_FromEnv(t *testing.T) {
 	_ = os.Setenv("HTTP_ADDR", "127.0.0.1")
 	_ = os.Setenv("HTTP_PORT", "9000")
 	_ = os.Setenv("DEFAULT_CHECKER", "ncmp")
+	_ = os.Setenv("EXTERNAL_DATA_DIR", "/srv/judge-data")
 	_ = os.Setenv("API_KEY", "my-secret-key")
 	_ = os.Setenv("LOG_LEVEL", "debug")
 
@@ -38,6 +40,7 @@ func TestLoad_FromEnv(t *testing.T) {
 	assert.Equal(t, "127.0.0.1", cfg.HTTPAddr)
 	assert.Equal(t, 9000, cfg.HTTPPort)
 	assert.Equal(t, "ncmp", cfg.DefaultChecker)
+	assert.Equal(t, "/srv/judge-data", cfg.ExternalDataDir)
 	assert.Equal(t, "my-secret-key", cfg.APIKey)
 	assert.Equal(t, "debug", cfg.LogLevel)
 }
@@ -57,7 +60,7 @@ func clearEnv() {
 		"HTTP_ADDR", "HTTP_PORT",
 		"CONTAINERD_SOCKET", "CONTAINERD_NAMESPACE",
 		"MAX_INPUT_SIZE_MB",
-		"DEFAULT_CHECKER",
+		"DEFAULT_CHECKER", "EXTERNAL_DATA_DIR",
 		"API_KEY", "LOG_LEVEL",
 	}
 	for _, v := range envVars {

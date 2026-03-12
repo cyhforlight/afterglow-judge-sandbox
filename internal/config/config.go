@@ -17,8 +17,9 @@ type Config struct {
 	ContainerdNamespace string
 
 	// Execution Limits
-	MaxInputSizeMB int
-	DefaultChecker string
+	MaxInputSizeMB  int
+	DefaultChecker  string
+	ExternalDataDir string
 
 	// Security
 	APIKey string
@@ -39,8 +40,9 @@ func Load() *Config {
 		ContainerdNamespace: getEnv("CONTAINERD_NAMESPACE", "afterglow-sandbox"),
 
 		// Execution Limits
-		MaxInputSizeMB: getEnvInt("MAX_INPUT_SIZE_MB", 256),
-		DefaultChecker: getEnv("DEFAULT_CHECKER", "default"),
+		MaxInputSizeMB:  getEnvInt("MAX_INPUT_SIZE_MB", 256),
+		DefaultChecker:  getEnv("DEFAULT_CHECKER", "default"),
+		ExternalDataDir: getEnv("EXTERNAL_DATA_DIR", "/home/forlight/afterglow-judge-engine/testdata"),
 
 		// Security
 		APIKey: os.Getenv("API_KEY"),

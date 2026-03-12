@@ -68,9 +68,9 @@ go build -o server ./cmd/server
 默认情况下：
 
 - 内置 checker、`testlib.h` 等 internal resources 会在构建时 embed 进二进制，运行时不需要额外放在可执行文件旁边
-- `testdata/`：仍然作为外部测试数据和外部 checker 的根目录，从可执行文件同级目录加载
+- 外部测试数据和外部 checker 根目录默认使用 `/home/forlight/afterglow-judge-engine/testdata`；也可以通过 `EXTERNAL_DATA_DIR` 显式指定
 
-因此最简单的用法仍然是在仓库根目录直接构建并运行，这样二进制旁边天然就有 `testdata/`。
+因此最简单的用法仍然是在仓库根目录直接构建并运行。
 
 ### 调用评测 API
 
@@ -319,6 +319,7 @@ external:relative/path/to/checker.cpp
 | `CONTAINERD_NAMESPACE` | `afterglow-sandbox` | containerd namespace |
 | `MAX_INPUT_SIZE_MB` | `256` | HTTP 请求体大小上限 |
 | `DEFAULT_CHECKER` | `default` | 未显式指定 `checker` 时使用的默认 checker |
+| `EXTERNAL_DATA_DIR` | `/home/forlight/afterglow-judge-engine/testdata` | 外部测试数据和外部 checker 根目录 |
 | `API_KEY` | 空 | Bearer Token；非空时自动启用鉴权 |
 | `LOG_LEVEL` | `info` | 日志级别；当前支持 `info` 和 `debug` |
 
