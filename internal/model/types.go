@@ -102,7 +102,6 @@ func (v Verdict) MarshalJSON() ([]byte, error) {
 
 // CompiledArtifact is a compiled program transferred by value between layers.
 type CompiledArtifact struct {
-	Name string
 	Data []byte
 	Mode os.FileMode
 }

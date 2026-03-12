@@ -63,8 +63,6 @@ func TestCompiler_LoadsArtifactFromWorkspace(t *testing.T) {
 		ImageRef:     "compiler-image",
 		Command:      []string{"gcc", "-o", "/work/program", "/work/main.c"},
 		ArtifactName: "program",
-		ArtifactMode: 0o755,
-		ArtifactPath: "program",
 		Limits: sandbox.ResourceLimits{
 			CPUTimeMs:   1000,
 			WallTimeMs:  3000,

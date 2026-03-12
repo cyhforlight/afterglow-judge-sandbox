@@ -105,6 +105,35 @@ func cppProfile() LanguageProfile {
 	}
 }
 
+// checkerProfile returns the profile for checker compilation and execution.
+// Checkers are C++ programs that use testlib.h to validate test outputs.
+func checkerProfile() LanguageProfile {
+	return LanguageProfile{
+		Compile: CompileConfig{
+			ImageRef:     "docker.io/library/gcc:12-bookworm",
+			SourceFiles:  []string{"checker.cpp"},
+			ArtifactName: "checker",
+			BuildCommand: func(sources []string) []string {
+				args := make([]string, 0, 11+len(sources))
+				args = append(args, "g++", "-std=c++20", "-O2", "-pipe", "-static", "-s", "-o", "/work/checker")
+				for _, src := range sources {
+					args = append(args, "/work/"+src)
+				}
+				args = append(args, "-lm")
+				return args
+			},
+			TimeoutMs: 30000,
+			MemoryMB:  512,
+		},
+		Run: RunConfig{
+			ImageRef:       "gcr.io/distroless/static-debian12:latest",
+			ArtifactName:   "checker",
+			RuntimeCommand: func(p string) []string { return []string{p} },
+			FileMode:       0755,
+		},
+	}
+}
+
 // javaProfile returns the profile for Java language.
 func javaProfile() LanguageProfile {
 	return LanguageProfile{

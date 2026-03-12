@@ -35,8 +35,6 @@ func TestCompiler_RealCompile(t *testing.T) {
 		ImageRef:     profile.Compile.ImageRef,
 		Command:      profile.Compile.BuildCommand(profile.Compile.SourceFiles),
 		ArtifactName: profile.Compile.ArtifactName,
-		ArtifactMode: profile.Run.FileMode,
-		ArtifactPath: profile.Compile.ArtifactName,
 		Limits: sandbox.ResourceLimits{
 			CPUTimeMs:   profile.Compile.TimeoutMs,
 			WallTimeMs:  profile.Compile.TimeoutMs * sandbox.WallTimeMultiplier,
@@ -72,8 +70,6 @@ func TestCompiler_CompilationFailure(t *testing.T) {
 		ImageRef:     profile.Compile.ImageRef,
 		Command:      profile.Compile.BuildCommand(profile.Compile.SourceFiles),
 		ArtifactName: profile.Compile.ArtifactName,
-		ArtifactMode: profile.Run.FileMode,
-		ArtifactPath: profile.Compile.ArtifactName,
 		Limits: sandbox.ResourceLimits{
 			CPUTimeMs:   profile.Compile.TimeoutMs,
 			WallTimeMs:  profile.Compile.TimeoutMs * sandbox.WallTimeMultiplier,
@@ -109,8 +105,6 @@ func TestCompiler_WorkspaceCleanedAfterCompile(t *testing.T) {
 		ImageRef:     profile.Compile.ImageRef,
 		Command:      profile.Compile.BuildCommand(profile.Compile.SourceFiles),
 		ArtifactName: profile.Compile.ArtifactName,
-		ArtifactMode: profile.Run.FileMode,
-		ArtifactPath: profile.Compile.ArtifactName,
 		Limits: sandbox.ResourceLimits{
 			CPUTimeMs:   profile.Compile.TimeoutMs,
 			WallTimeMs:  profile.Compile.TimeoutMs * sandbox.WallTimeMultiplier,

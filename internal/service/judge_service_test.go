@@ -114,7 +114,6 @@ func testCompiledArtifact() *model.CompiledArtifact {
 
 func testCheckerArtifact() *model.CompiledArtifact {
 	return &model.CompiledArtifact{
-		Name: checkerArtifactFileName,
 		Data: []byte("checker-binary"),
 		Mode: 0o755,
 	}

@@ -283,8 +283,6 @@ func (s *JudgeEngine) compileUserCode(
 		ImageRef:     profile.Compile.ImageRef,
 		Command:      profile.Compile.BuildCommand(profile.Compile.SourceFiles),
 		ArtifactName: profile.Compile.ArtifactName,
-		ArtifactMode: profile.Run.FileMode,
-		ArtifactPath: profile.Compile.ArtifactName,
 		Limits: sandbox.ResourceLimits{
 			CPUTimeMs:   profile.Compile.TimeoutMs,
 			WallTimeMs:  profile.Compile.TimeoutMs * sandbox.WallTimeMultiplier,
@@ -335,7 +333,6 @@ func (s *JudgeEngine) prepareChecker(
 		if cached, ok := s.cache.Get(cacheKey); ok {
 			s.log.InfoContext(ctx, "checker cache hit", "key", cacheKey[:16])
 			return &model.CompiledArtifact{
-				Name: checkerArtifactFileName,
 				Data: cached,
 				Mode: 0755,
 			}, model.CompileResult{Succeeded: true}, nil
@@ -350,7 +347,7 @@ func (s *JudgeEngine) prepareChecker(
 	}
 
 	// Compile checker
-	profile := cppProfile()
+	profile := checkerProfile()
 	compileReq := CompileRequest{
 		Files: []workspace.File{
 			{
@@ -366,9 +363,7 @@ func (s *JudgeEngine) prepareChecker(
 		},
 		ImageRef:     profile.Compile.ImageRef,
 		Command:      profile.Compile.BuildCommand([]string{checkerSourceFileName}),
-		ArtifactName: checkerArtifactFileName,
-		ArtifactMode: profile.Run.FileMode,
-		ArtifactPath: profile.Compile.ArtifactName,
+		ArtifactName: profile.Compile.ArtifactName,
 		Limits: sandbox.ResourceLimits{
 			CPUTimeMs:   profile.Compile.TimeoutMs,
 			WallTimeMs:  profile.Compile.TimeoutMs * sandbox.WallTimeMultiplier,
@@ -380,11 +375,6 @@ func (s *JudgeEngine) prepareChecker(
 	compileOut, err := s.compiler.Compile(ctx, compileReq)
 	if err != nil {
 		return nil, model.CompileResult{}, err
-	}
-
-	// Ensure artifact has correct name
-	if compileOut.Artifact != nil {
-		compileOut.Artifact.Name = checkerArtifactFileName
 	}
 
 	// Cache successful compilation
@@ -418,17 +408,12 @@ func (s *JudgeEngine) executeUserCode(
 		return model.ExecuteResult{}, errors.New("program artifact is required")
 	}
 
-	programMode := artifact.Mode
-	if programMode == 0 {
-		programMode = profile.Run.FileMode
-	}
-
 	containerPath := runMountDir + "/" + profile.Run.ArtifactName
 	runOut, err := s.runner.Run(ctx, RunRequest{
 		Files: []workspace.File{{
 			Name:    profile.Run.ArtifactName,
 			Content: artifact.Data,
-			Mode:    programMode,
+			Mode:    artifact.Mode,
 		}},
 		ImageRef: profile.Run.ImageRef,
 		Command:  profile.Run.RuntimeCommand(containerPath),
@@ -488,22 +473,17 @@ func (s *JudgeEngine) runChecker(
 		return model.VerdictUKE, "", errors.New("checker artifact is required")
 	}
 
-	profile := cppProfile().Run
-	checkerMode := checkerArtifact.Mode
-	if checkerMode == 0 {
-		checkerMode = profile.FileMode
-	}
-
+	profile := checkerProfile()
 	runOut, err := s.runner.Run(ctx, RunRequest{
 		Files: []workspace.File{
-			{Name: checkerArtifactFileName, Content: checkerArtifact.Data, Mode: checkerMode},
+			{Name: profile.Run.ArtifactName, Content: checkerArtifact.Data, Mode: checkerArtifact.Mode},
 			{Name: checkerInputFileName, Content: []byte(inputText), Mode: 0644},
 			{Name: checkerOutputFileName, Content: []byte(actualOutput), Mode: 0644},
 			{Name: checkerAnswerFileName, Content: []byte(expectedOutput), Mode: 0644},
 		},
-		ImageRef: profile.ImageRef,
+		ImageRef: profile.Run.ImageRef,
 		Command: []string{
-			runMountDir + "/" + checkerArtifactFileName,
+			runMountDir + "/" + profile.Run.ArtifactName,
 			runMountDir + "/" + checkerInputFileName,
 			runMountDir + "/" + checkerOutputFileName,
 			runMountDir + "/" + checkerAnswerFileName,

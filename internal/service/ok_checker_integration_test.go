@@ -90,7 +90,7 @@ func compileCheckerForTestOK(ctx context.Context, t *testing.T, checkerName stri
 	sb := sandbox.NewContainerdSandbox("", "")
 	compiler := NewCompiler(sb)
 
-	profile := cppProfile()
+	profile := checkerProfile()
 	out, err := compiler.Compile(ctx, CompileRequest{
 		Files: []workspace.File{
 			{Name: checkerSourceFileName, Content: checkerSource, Mode: 0o644},
@@ -98,9 +98,7 @@ func compileCheckerForTestOK(ctx context.Context, t *testing.T, checkerName stri
 		},
 		ImageRef:     profile.Compile.ImageRef,
 		Command:      profile.Compile.BuildCommand([]string{checkerSourceFileName}),
-		ArtifactName: checkerArtifactFileName,
-		ArtifactMode: profile.Run.FileMode,
-		ArtifactPath: profile.Compile.ArtifactName,
+		ArtifactName: profile.Compile.ArtifactName,
 		Limits: sandbox.ResourceLimits{
 			CPUTimeMs:   profile.Compile.TimeoutMs,
 			WallTimeMs:  profile.Compile.TimeoutMs * sandbox.WallTimeMultiplier,
@@ -110,7 +108,6 @@ func compileCheckerForTestOK(ctx context.Context, t *testing.T, checkerName stri
 	})
 	require.NoError(t, err)
 	require.True(t, out.Result.Succeeded, "checker compilation failed: %s", out.Result.Log)
-	out.Artifact.Name = checkerArtifactFileName
 
 	return *out.Artifact
 }

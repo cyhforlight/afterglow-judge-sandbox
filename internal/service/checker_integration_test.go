@@ -52,7 +52,7 @@ func compileCheckerForTest(ctx context.Context, t *testing.T, checkerName string
 	sb := sandbox.NewContainerdSandbox("", "")
 	compiler := NewCompiler(sb)
 
-	profile := cppProfile()
+	profile := checkerProfile()
 	out, err := compiler.Compile(ctx, CompileRequest{
 		Files: []workspace.File{
 			{Name: checkerSourceFileName, Content: checkerSource, Mode: 0o644},
@@ -60,9 +60,7 @@ func compileCheckerForTest(ctx context.Context, t *testing.T, checkerName string
 		},
 		ImageRef:     profile.Compile.ImageRef,
 		Command:      profile.Compile.BuildCommand([]string{checkerSourceFileName}),
-		ArtifactName: checkerArtifactFileName,
-		ArtifactMode: profile.Run.FileMode,
-		ArtifactPath: profile.Compile.ArtifactName,
+		ArtifactName: profile.Compile.ArtifactName,
 		Limits: sandbox.ResourceLimits{
 			CPUTimeMs:   profile.Compile.TimeoutMs,
 			WallTimeMs:  profile.Compile.TimeoutMs * sandbox.WallTimeMultiplier,
@@ -73,7 +71,6 @@ func compileCheckerForTest(ctx context.Context, t *testing.T, checkerName string
 	require.NoError(t, err)
 	require.True(t, out.Result.Succeeded)
 	require.NotNil(t, out.Artifact)
-	out.Artifact.Name = checkerArtifactFileName
 
 	return *out.Artifact
 }
@@ -89,22 +86,17 @@ func runCheckerForTest(
 	sb := sandbox.NewContainerdSandbox("", "")
 	runner := NewRunner(sb)
 
-	profile := cppProfile().Run
-	checkerMode := checker.Mode
-	if checkerMode == 0 {
-		checkerMode = profile.FileMode
-	}
-
+	profile := checkerProfile()
 	runOut, err := runner.Run(ctx, RunRequest{
 		Files: []workspace.File{
-			{Name: checkerArtifactFileName, Content: checker.Data, Mode: checkerMode},
+			{Name: profile.Run.ArtifactName, Content: checker.Data, Mode: checker.Mode},
 			{Name: checkerInputFileName, Content: []byte(inputText), Mode: 0o644},
 			{Name: checkerOutputFileName, Content: []byte(actualOutput), Mode: 0o644},
 			{Name: checkerAnswerFileName, Content: []byte(expectedOutput), Mode: 0o644},
 		},
-		ImageRef: profile.ImageRef,
+		ImageRef: profile.Run.ImageRef,
 		Command: []string{
-			runMountDir + "/" + checkerArtifactFileName,
+			runMountDir + "/" + profile.Run.ArtifactName,
 			runMountDir + "/" + checkerInputFileName,
 			runMountDir + "/" + checkerOutputFileName,
 			runMountDir + "/" + checkerAnswerFileName,

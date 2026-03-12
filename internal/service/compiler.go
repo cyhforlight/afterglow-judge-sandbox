@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"afterglow-judge-engine/internal/model"
@@ -21,8 +19,6 @@ type CompileRequest struct {
 	ImageRef     string
 	Command      []string
 	ArtifactName string
-	ArtifactMode os.FileMode
-	ArtifactPath string
 	Limits       sandbox.ResourceLimits
 }
 
@@ -85,9 +81,6 @@ func validateCompileRequest(req CompileRequest) error {
 	if strings.TrimSpace(req.ArtifactName) == "" {
 		return errors.New("artifact name is required")
 	}
-	if strings.TrimSpace(req.ArtifactPath) == "" {
-		return errors.New("artifact path is required")
-	}
 	return nil
 }
 
@@ -149,17 +142,7 @@ func (c *compiler) compileInContainer(ctx context.Context, req CompileRequest) (
 }
 
 func loadCompiledArtifactFromRequest(ws *workspace.Workspace, req CompileRequest) (model.CompiledArtifact, error) {
-	artifact, err := loadCompiledArtifact(ws, req.ArtifactPath)
-	if err != nil {
-		return model.CompiledArtifact{}, err
-	}
-	if artifact.Name == "" {
-		artifact.Name = req.ArtifactName
-	}
-	if artifact.Mode == 0 {
-		artifact.Mode = req.ArtifactMode
-	}
-	return artifact, nil
+	return loadCompiledArtifact(ws, req.ArtifactName)
 }
 
 func loadCompiledArtifact(ws *workspace.Workspace, name string) (model.CompiledArtifact, error) {
@@ -174,7 +157,6 @@ func loadCompiledArtifact(ws *workspace.Workspace, name string) (model.CompiledA
 	}
 
 	return model.CompiledArtifact{
-		Name: filepath.Base(name),
 		Data: data,
 		Mode: info.Mode().Perm(),
 	}, nil

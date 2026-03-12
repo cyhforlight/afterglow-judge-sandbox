@@ -115,8 +115,6 @@ func compileProgram(t *testing.T, env serviceIntegrationEnv, lang model.Language
 		ImageRef:     profile.Compile.ImageRef,
 		Command:      profile.Compile.BuildCommand(profile.Compile.SourceFiles),
 		ArtifactName: profile.Compile.ArtifactName,
-		ArtifactMode: profile.Run.FileMode,
-		ArtifactPath: profile.Compile.ArtifactName,
 		Limits: sandbox.ResourceLimits{
 			CPUTimeMs:   profile.Compile.TimeoutMs,
 			WallTimeMs:  profile.Compile.TimeoutMs * sandbox.WallTimeMultiplier,
