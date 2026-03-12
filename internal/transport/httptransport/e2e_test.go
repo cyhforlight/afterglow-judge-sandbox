@@ -158,7 +158,7 @@ func newE2EHandler(t *testing.T) *Handler {
 	require.NoError(t, err)
 
 	testdataDir := filepath.Join(projectRoot(t), "testdata")
-	externalStorage, err := storage.NewExternalStorage(testdataDir, compileCache)
+	externalStorage, err := storage.NewExternalStorage(testdataDir)
 	require.NoError(t, err)
 
 	baseCompiler := service.NewCompiler(sb)

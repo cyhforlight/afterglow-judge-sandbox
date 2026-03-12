@@ -58,14 +58,14 @@ func initializeComponents(cfg *config.Config) (service.JudgeService, error) {
 		return nil, fmt.Errorf("initialize internal storage: %w", err)
 	}
 
-	// 3. Create Cache instance (not a global singleton)
+	// 3. Create checker compile cache (not a global singleton).
 	compileCache, err := cache.New(500)
 	if err != nil {
 		slog.Warn("failed to initialize cache", "error", err)
-		compileCache = nil // Allow running without cache
+		compileCache = nil // Allow running without checker cache.
 	}
 
-	// 4. Create ExternalStorage for test data files
+	// 4. Create ExternalStorage for test data files.
 	executablePath, err := os.Executable()
 	if err != nil {
 		slog.Warn("failed to resolve executable path for testdata", "error", err)
@@ -77,7 +77,7 @@ func initializeComponents(cfg *config.Config) (service.JudgeService, error) {
 			slog.Warn("failed to resolve executable symlinks", "error", err)
 		} else {
 			testdataDir := filepath.Join(filepath.Dir(resolvedPath), "testdata")
-			externalStorage, err = storage.NewExternalStorage(testdataDir, compileCache)
+			externalStorage, err = storage.NewExternalStorage(testdataDir)
 			if err != nil {
 				slog.Warn("failed to initialize external storage", "error", err, "path", testdataDir)
 				externalStorage = nil
