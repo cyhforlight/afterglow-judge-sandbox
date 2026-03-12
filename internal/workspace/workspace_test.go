@@ -42,3 +42,23 @@ func TestWorkspace_WriteFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, content, readContent)
 }
+
+func TestWorkspace_WriteFilesAndReadFile(t *testing.T) {
+	ws, err := New()
+	require.NoError(t, err)
+	defer func() { _ = ws.Cleanup() }()
+
+	err = ws.WriteFiles([]File{
+		{Name: "main.cpp", Content: []byte("int main(){}"), Mode: 0o644},
+		{Name: "program", Content: []byte("binary"), Mode: 0o755},
+	})
+	require.NoError(t, err)
+
+	source, err := ws.ReadFile("main.cpp")
+	require.NoError(t, err)
+	assert.Equal(t, []byte("int main(){}"), source)
+
+	info, err := ws.Stat("program")
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o755), info.Mode().Perm())
+}

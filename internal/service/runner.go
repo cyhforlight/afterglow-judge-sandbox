@@ -82,14 +82,8 @@ func (r *runner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 	}
 	defer func() { _ = ws.Cleanup() }()
 
-	for _, file := range req.Files {
-		fileMode := file.Mode
-		if fileMode == 0 {
-			fileMode = 0644
-		}
-		if err := ws.WriteFile(file.Name, file.Content, fileMode); err != nil {
-			return RunResult{}, fmt.Errorf("write run file %q: %w", file.Name, err)
-		}
+	if err := ws.WriteFiles(toRunWorkspaceFiles(req.Files)); err != nil {
+		return RunResult{}, fmt.Errorf("write run files: %w", err)
 	}
 
 	cwd := req.Cwd
@@ -122,4 +116,16 @@ func (r *runner) Run(ctx context.Context, req RunRequest) (RunResult, error) {
 		Verdict:   result.Verdict,
 		ExtraInfo: result.ExtraInfo,
 	}, nil
+}
+
+func toRunWorkspaceFiles(files []RunFile) []workspace.File {
+	workspaceFiles := make([]workspace.File, 0, len(files))
+	for _, file := range files {
+		workspaceFiles = append(workspaceFiles, workspace.File{
+			Name:    file.Name,
+			Content: file.Content,
+			Mode:    file.Mode,
+		})
+	}
+	return workspaceFiles
 }

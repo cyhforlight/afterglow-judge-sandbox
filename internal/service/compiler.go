@@ -112,14 +112,8 @@ func (c *compiler) compileInContainer(ctx context.Context, req CompileRequest) (
 	}
 	defer func() { _ = ws.Cleanup() }()
 
-	for _, file := range req.Files {
-		fileMode := file.Mode
-		if fileMode == 0 {
-			fileMode = 0644
-		}
-		if err := ws.WriteFile(file.Name, file.Content, fileMode); err != nil {
-			return out, fmt.Errorf("write compile file %q: %w", file.Name, err)
-		}
+	if err := ws.WriteFiles(toWorkspaceFiles(req.Files)); err != nil {
+		return out, fmt.Errorf("write compile files: %w", err)
 	}
 
 	result, err := c.sandbox.Execute(ctx, sandbox.ExecuteRequest{
@@ -157,7 +151,7 @@ func (c *compiler) compileInContainer(ctx context.Context, req CompileRequest) (
 		Log:       compileLog,
 	}
 
-	artifact, err := loadCompiledArtifactFromRequest(ws.Dir(), req)
+	artifact, err := loadCompiledArtifactFromRequest(ws, req)
 	if err != nil {
 		return out, fmt.Errorf("read compiled artifact: %w", err)
 	}
@@ -165,9 +159,21 @@ func (c *compiler) compileInContainer(ctx context.Context, req CompileRequest) (
 	return out, nil
 }
 
-func loadCompiledArtifactFromRequest(workDir string, req CompileRequest) (model.CompiledArtifact, error) {
+func toWorkspaceFiles(files []CompileFile) []workspace.File {
+	workspaceFiles := make([]workspace.File, 0, len(files))
+	for _, file := range files {
+		workspaceFiles = append(workspaceFiles, workspace.File{
+			Name:    file.Name,
+			Content: file.Content,
+			Mode:    file.Mode,
+		})
+	}
+	return workspaceFiles
+}
+
+func loadCompiledArtifactFromRequest(ws *workspace.Workspace, req CompileRequest) (model.CompiledArtifact, error) {
 	if req.ArtifactLoader != nil {
-		artifact, err := req.ArtifactLoader(workDir)
+		artifact, err := req.ArtifactLoader(ws.Dir())
 		if err != nil {
 			return model.CompiledArtifact{}, err
 		}
@@ -180,7 +186,7 @@ func loadCompiledArtifactFromRequest(workDir string, req CompileRequest) (model.
 		return artifact, nil
 	}
 
-	artifact, err := loadCompiledArtifact(filepath.Join(workDir, req.ArtifactPath))
+	artifact, err := loadCompiledArtifact(ws, req.ArtifactPath)
 	if err != nil {
 		return model.CompiledArtifact{}, err
 	}
@@ -193,7 +199,25 @@ func loadCompiledArtifactFromRequest(workDir string, req CompileRequest) (model.
 	return artifact, nil
 }
 
-func loadCompiledArtifact(path string) (model.CompiledArtifact, error) {
+func loadCompiledArtifact(ws *workspace.Workspace, name string) (model.CompiledArtifact, error) {
+	info, err := ws.Stat(name)
+	if err != nil {
+		return model.CompiledArtifact{}, err
+	}
+
+	data, err := ws.ReadFile(name)
+	if err != nil {
+		return model.CompiledArtifact{}, err
+	}
+
+	return model.CompiledArtifact{
+		Name: filepath.Base(name),
+		Data: data,
+		Mode: info.Mode().Perm(),
+	}, nil
+}
+
+func loadCompiledArtifactAtPath(path string) (model.CompiledArtifact, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return model.CompiledArtifact{}, fmt.Errorf("stat artifact %q: %w", path, err)

@@ -259,7 +259,7 @@ func loadPythonBytecodeArtifact(artifactName string, artifactMode os.FileMode) A
 				continue
 			}
 
-			artifact, err := loadCompiledArtifact(filepath.Join(pycachePath, entry.Name()))
+			artifact, err := loadCompiledArtifactAtPath(filepath.Join(pycachePath, entry.Name()))
 			if err != nil {
 				return model.CompiledArtifact{}, err
 			}
