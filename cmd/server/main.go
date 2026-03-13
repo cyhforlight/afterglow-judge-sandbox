@@ -34,7 +34,7 @@ func main() {
 
 	server := httptransport.NewServer(cfg, judgeService, logger)
 
-	if err := runServer(server, cfg, logger); err != nil {
+	if err := runServer(server, logger); err != nil {
 		logger.Error("server error", "error", err)
 		os.Exit(1)
 	}
@@ -101,7 +101,7 @@ func initializeComponents(cfg *config.Config) (service.JudgeService, error) {
 
 	return judge, nil
 }
-func runServer(server *httptransport.Server, cfg *config.Config, logger *slog.Logger) error {
+func runServer(server *httptransport.Server, logger *slog.Logger) error {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 

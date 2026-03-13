@@ -335,7 +335,6 @@ func TestJudgeEngine_AllTestCasesPass(t *testing.T) {
 	assert.Equal(t, 3, result.TotalCount)
 }
 
-
 func TestJudgeEngine_SingleTestCase(t *testing.T) {
 	runner := &fakeRunner{runResults: []RunResult{
 		userOKRunResult("42\n"), checkerOKRunResult(),
@@ -357,7 +356,6 @@ func TestJudgeEngine_SingleTestCase(t *testing.T) {
 	assert.Equal(t, model.VerdictOK, result.Verdict)
 	assert.Equal(t, 1, result.PassedCount)
 }
-
 
 func TestJudgeEngine_CheckerCompileFailureReturnsUnknownError(t *testing.T) {
 	compiler := &fakeCompiler{compileResults: []CompileOutput{

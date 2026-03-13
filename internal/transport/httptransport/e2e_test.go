@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -283,8 +282,8 @@ func assertSuiteMatchesCodeDirectory(t *testing.T, suite e2eProblemSuite) {
 	}
 	slices.Sort(configured)
 
-	assert.Equal(t, configured, discovered,
-		fmt.Sprintf("suite %s must cover all and only code files in testdata", suite.name))
+	assert.Equalf(t, configured, discovered,
+		"suite %s must cover all and only code files in testdata", suite.name)
 }
 
 func readSourceCode(t *testing.T, problemDir, filename string) string {
