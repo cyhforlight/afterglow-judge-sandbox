@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode"
 
-	"afterglow-judge-engine/internal/storage"
+	"afterglow-judge-engine/internal/resource"
 )
 
 const (
@@ -75,7 +75,7 @@ func validateCheckerShortName(name string) error {
 }
 
 func validateExternalCheckerPath(checkerPath string) (string, error) {
-	normalizedPath, err := storage.NormalizeResourceKey(checkerPath)
+	normalizedPath, err := resource.NormalizeKey(checkerPath)
 	if err != nil {
 		return "", fmt.Errorf("invalid external checker path: %w", err)
 	}

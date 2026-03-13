@@ -12,9 +12,9 @@ import (
 
 	"afterglow-judge-engine/internal/cache"
 	"afterglow-judge-engine/internal/config"
+	"afterglow-judge-engine/internal/resource"
 	"afterglow-judge-engine/internal/sandbox"
 	"afterglow-judge-engine/internal/service"
-	"afterglow-judge-engine/internal/storage"
 	"afterglow-judge-engine/internal/transport/httptransport"
 )
 
@@ -55,9 +55,9 @@ func initializeComponents(cfg *config.Config) (service.JudgeService, error) {
 	sb := sandbox.NewContainerdSandbox(cfg.ContainerdSocket, cfg.ContainerdNamespace)
 
 	// 2. Load bundled internal resources before the service starts listening.
-	internalStorage, err := storage.NewBundledInternalStorage()
+	bundledResources, err := resource.NewBundled()
 	if err != nil {
-		return nil, fmt.Errorf("initialize internal storage: %w", err)
+		return nil, fmt.Errorf("initialize bundled resources: %w", err)
 	}
 
 	// 3. Create checker compile cache (not a global singleton).
@@ -67,13 +67,13 @@ func initializeComponents(cfg *config.Config) (service.JudgeService, error) {
 		compileCache = nil // Allow running without checker cache.
 	}
 
-	// 4. Create ExternalStorage for test data files.
-	var externalStorage *storage.ExternalStorage
+	// 4. Create external resource store for test data files.
+	var externalResources *resource.External
 	if cfg.ExternalDataDir != "" {
-		externalStorage, err = storage.NewExternalStorage(cfg.ExternalDataDir)
+		externalResources, err = resource.NewExternal(cfg.ExternalDataDir)
 		if err != nil {
-			slog.Warn("failed to initialize external storage", "error", err, "path", cfg.ExternalDataDir)
-			externalStorage = nil
+			slog.Warn("failed to initialize external resources", "error", err, "path", cfg.ExternalDataDir)
+			externalResources = nil
 		}
 	}
 
@@ -85,8 +85,8 @@ func initializeComponents(cfg *config.Config) (service.JudgeService, error) {
 	judge, err := service.NewJudgeEngine(
 		compiler,
 		runner,
-		internalStorage,
-		externalStorage,
+		bundledResources,
+		externalResources,
 		cfg.DefaultChecker,
 		compileCache,
 	)

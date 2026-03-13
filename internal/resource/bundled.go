@@ -1,4 +1,4 @@
-package storage
+package resource
 
 import (
 	"bytes"
@@ -13,54 +13,54 @@ import (
 	rootassets "afterglow-judge-engine"
 )
 
-// InternalStorage implements read-only storage for project-bundled resources.
+// Bundled implements read-only access to project-bundled resources.
 // Used for resources like testlib.h and builtin checker sources.
-type InternalStorage struct {
+type Bundled struct {
 	fsys iofs.FS
 }
 
 const bundledSupportDirName = "support"
 
-// NewBundledInternalStorage creates a storage backed by embedded support resources.
-func NewBundledInternalStorage() (*InternalStorage, error) {
+// NewBundled creates a resource store backed by embedded support resources.
+func NewBundled() (*Bundled, error) {
 	bundledFS, err := iofs.Sub(rootassets.BundledSupportFiles, bundledSupportDirName)
 	if err != nil {
 		return nil, fmt.Errorf("open bundled support resources: %w", err)
 	}
 
-	return newInternalStorage(bundledFS), nil
+	return newBundled(bundledFS), nil
 }
 
-func newInternalStorage(fsys iofs.FS) *InternalStorage {
-	return &InternalStorage{fsys: fsys}
+func newBundled(fsys iofs.FS) *Bundled {
+	return &Bundled{fsys: fsys}
 }
 
 // Get retrieves bundled resource content by trusted relative key.
-func (s *InternalStorage) Get(_ context.Context, key string) ([]byte, error) {
-	data, err := iofs.ReadFile(s.fsys, key)
+func (b *Bundled) Get(_ context.Context, key string) ([]byte, error) {
+	data, err := iofs.ReadFile(b.fsys, key)
 	if errors.Is(err, iofs.ErrNotExist) {
 		return nil, fmt.Errorf("resource not found: %s", key)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read internal resource %q: %w", key, err)
+		return nil, fmt.Errorf("read bundled resource %q: %w", key, err)
 	}
 
 	return bytes.Clone(data), nil
 }
 
-// Stat verifies that a bundled resource key exists in storage.
-func (s *InternalStorage) Stat(_ context.Context, key string) error {
-	if _, err := iofs.Stat(s.fsys, key); errors.Is(err, iofs.ErrNotExist) {
+// Stat verifies that a bundled resource key exists.
+func (b *Bundled) Stat(_ context.Context, key string) error {
+	if _, err := iofs.Stat(b.fsys, key); errors.Is(err, iofs.ErrNotExist) {
 		return fmt.Errorf("resource not found: %s", key)
 	} else if err != nil {
-		return fmt.Errorf("stat internal resource %q: %w", key, err)
+		return fmt.Errorf("stat bundled resource %q: %w", key, err)
 	}
 
 	return nil
 }
 
-// NormalizeResourceKey validates and normalizes a resource key.
-func NormalizeResourceKey(key string) (string, error) {
+// NormalizeKey validates and normalizes a resource key.
+func NormalizeKey(key string) (string, error) {
 	if strings.TrimSpace(key) == "" {
 		return "", errors.New("resource key is required")
 	}

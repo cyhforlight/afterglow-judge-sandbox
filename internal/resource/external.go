@@ -1,4 +1,4 @@
-package storage
+package resource
 
 import (
 	"context"
@@ -8,13 +8,13 @@ import (
 	"strings"
 )
 
-// ExternalStorage provides read-only access to external files.
-type ExternalStorage struct {
+// External provides read-only access to external files.
+type External struct {
 	mountPoint string
 }
 
-// NewExternalStorage creates a read-only storage mounted at the specified directory.
-func NewExternalStorage(mountPoint string) (*ExternalStorage, error) {
+// NewExternal creates a read-only resource store mounted at the specified directory.
+func NewExternal(mountPoint string) (*External, error) {
 	// Verify mount point exists and is a directory
 	info, err := os.Stat(mountPoint)
 	if err != nil {
@@ -24,15 +24,15 @@ func NewExternalStorage(mountPoint string) (*ExternalStorage, error) {
 		return nil, fmt.Errorf("mount point is not a directory: %q", mountPoint)
 	}
 
-	return &ExternalStorage{
+	return &External{
 		mountPoint: mountPoint,
 	}, nil
 }
 
 // Get retrieves file content by relative path.
 // The path is relative to the mount point (e.g., "testdata/input.txt").
-func (s *ExternalStorage) Get(_ context.Context, relPath string) ([]byte, error) {
-	resolvedPath, err := s.resolveRegularFilePath(relPath)
+func (e *External) Get(_ context.Context, relPath string) ([]byte, error) {
+	resolvedPath, err := e.resolveRegularFilePath(relPath)
 	if err != nil {
 		return nil, err
 	}
@@ -47,20 +47,20 @@ func (s *ExternalStorage) Get(_ context.Context, relPath string) ([]byte, error)
 }
 
 // Stat verifies that a relative path resolves to an accessible regular file inside the mount.
-func (s *ExternalStorage) Stat(_ context.Context, relPath string) error {
-	_, err := s.resolveRegularFilePath(relPath)
+func (e *External) Stat(_ context.Context, relPath string) error {
+	_, err := e.resolveRegularFilePath(relPath)
 	return err
 }
 
-func (s *ExternalStorage) resolveRegularFilePath(relPath string) (string, error) {
+func (e *External) resolveRegularFilePath(relPath string) (string, error) {
 	// Normalize and validate path (prevent path traversal)
-	normalized, err := NormalizeResourceKey(relPath)
+	normalized, err := NormalizeKey(relPath)
 	if err != nil {
 		return "", err
 	}
 
 	// Build full path
-	fullPath := filepath.Join(s.mountPoint, normalized)
+	fullPath := filepath.Join(e.mountPoint, normalized)
 
 	// Resolve symlinks to prevent mount escape
 	resolvedPath, err := filepath.EvalSymlinks(fullPath)
@@ -69,7 +69,7 @@ func (s *ExternalStorage) resolveRegularFilePath(relPath string) (string, error)
 	}
 
 	// Resolve mount point symlinks
-	resolvedMount, err := filepath.EvalSymlinks(s.mountPoint)
+	resolvedMount, err := filepath.EvalSymlinks(e.mountPoint)
 	if err != nil {
 		return "", fmt.Errorf("resolve mount point: %w", err)
 	}

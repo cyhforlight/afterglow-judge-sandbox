@@ -15,9 +15,9 @@ import (
 	"testing"
 
 	"afterglow-judge-engine/internal/cache"
+	"afterglow-judge-engine/internal/resource"
 	"afterglow-judge-engine/internal/sandbox"
 	"afterglow-judge-engine/internal/service"
-	"afterglow-judge-engine/internal/storage"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -152,19 +152,19 @@ func newE2EHandler(t *testing.T) *Handler {
 	t.Helper()
 
 	sb := sandbox.NewContainerdSandbox("/run/containerd/containerd.sock", "")
-	internalStorage, err := storage.NewBundledInternalStorage()
+	bundledResources, err := resource.NewBundled()
 	require.NoError(t, err)
 	compileCache, err := cache.New(100)
 	require.NoError(t, err)
 
 	testdataDir := filepath.Join(projectRoot(t), "testdata")
-	externalStorage, err := storage.NewExternalStorage(testdataDir)
+	externalResources, err := resource.NewExternal(testdataDir)
 	require.NoError(t, err)
 
 	baseCompiler := service.NewCompiler(sb)
 	baseRunner := service.NewRunner(sb)
 	judge, err := service.NewJudgeEngine(baseCompiler, baseRunner,
-		internalStorage, externalStorage, "default", compileCache)
+		bundledResources, externalResources, "default", compileCache)
 	require.NoError(t, err)
 
 	ctx := context.Background()

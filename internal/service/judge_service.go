@@ -10,8 +10,8 @@ import (
 
 	"afterglow-judge-engine/internal/cache"
 	"afterglow-judge-engine/internal/model"
+	"afterglow-judge-engine/internal/resource"
 	"afterglow-judge-engine/internal/sandbox"
-	"afterglow-judge-engine/internal/storage"
 	"afterglow-judge-engine/internal/workspace"
 )
 
@@ -38,7 +38,7 @@ func NewJudgeEngine(
 	compiler Compiler,
 	runner Runner,
 	resources ResourceStore,
-	externalStorage *storage.ExternalStorage,
+	externalStorage *resource.External,
 	defaultChecker string,
 	cache *cache.Cache,
 ) (*JudgeEngine, error) {

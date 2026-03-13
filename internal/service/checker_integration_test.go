@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"afterglow-judge-engine/internal/model"
+	"afterglow-judge-engine/internal/resource"
 	"afterglow-judge-engine/internal/sandbox"
-	"afterglow-judge-engine/internal/storage"
 	"afterglow-judge-engine/internal/workspace"
 
 	"github.com/stretchr/testify/assert"
@@ -33,7 +33,7 @@ type checkerScenario struct {
 func newInternalResourceStoreForTest(t *testing.T) ResourceStore {
 	t.Helper()
 
-	resourceStore, err := storage.NewBundledInternalStorage()
+	resourceStore, err := resource.NewBundled()
 	require.NoError(t, err)
 	return resourceStore
 }
