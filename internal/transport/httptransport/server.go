@@ -68,7 +68,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		return s.Stop(context.Background())
+		return nil
 	case err := <-errChan:
 		return fmt.Errorf("server error: %w", err)
 	}
