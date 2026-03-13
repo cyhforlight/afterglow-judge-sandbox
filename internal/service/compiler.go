@@ -133,16 +133,12 @@ func (c *compiler) compileInContainer(ctx context.Context, req CompileRequest) (
 		Log:       compileLog,
 	}
 
-	artifact, err := loadCompiledArtifactFromRequest(ws, req)
+	artifact, err := loadCompiledArtifact(ws, req.ArtifactName)
 	if err != nil {
 		return out, fmt.Errorf("read compiled artifact: %w", err)
 	}
 	out.Artifact = &artifact
 	return out, nil
-}
-
-func loadCompiledArtifactFromRequest(ws *workspace.Workspace, req CompileRequest) (model.CompiledArtifact, error) {
-	return loadCompiledArtifact(ws, req.ArtifactName)
 }
 
 func loadCompiledArtifact(ws *workspace.Workspace, name string) (model.CompiledArtifact, error) {

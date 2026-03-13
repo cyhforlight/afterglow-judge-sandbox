@@ -131,10 +131,6 @@ func (s *JudgeEngine) validateExternalDependency(ctx context.Context, path, labe
 
 // Judge compiles source code and evaluates all test cases.
 func (s *JudgeEngine) Judge(ctx context.Context, req model.JudgeRequest) model.JudgeResult {
-	if err := validateJudgeRequest(req); err != nil {
-		return failedBeforeRun(req.TestCases, err.Error())
-	}
-
 	// Copy TestCases to avoid mutating caller's slice.
 	// req is passed by value, but TestCases is a slice (reference type).
 	testCases := make([]model.JudgeTestCase, len(req.TestCases))
@@ -238,25 +234,6 @@ func (s *JudgeEngine) loadTestCaseData(ctx context.Context, testCase *model.Judg
 		testCase.ExpectedOutputFile = "" // Clear after loading
 	}
 
-	return nil
-}
-
-func validateJudgeRequest(req model.JudgeRequest) error {
-	if strings.TrimSpace(req.SourceCode) == "" {
-		return errors.New("source code is required")
-	}
-	if req.Language == model.LanguageUnknown {
-		return errors.New("language is required")
-	}
-	if req.TimeLimit <= 0 {
-		return errors.New("time limit must be positive")
-	}
-	if req.MemoryLimit <= 0 {
-		return errors.New("memory limit must be positive")
-	}
-	if len(req.TestCases) == 0 {
-		return errors.New("at least one testcase is required")
-	}
 	return nil
 }
 

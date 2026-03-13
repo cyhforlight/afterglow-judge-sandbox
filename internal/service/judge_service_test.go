@@ -335,21 +335,6 @@ func TestJudgeEngine_AllTestCasesPass(t *testing.T) {
 	assert.Equal(t, 3, result.TotalCount)
 }
 
-func TestJudgeEngine_EmptyTestCases(t *testing.T) {
-	engine := newTestJudgeEngine(nil, nil, nil)
-
-	result := engine.Judge(context.Background(), model.JudgeRequest{
-		SourceCode:  "code",
-		Language:    model.LanguageCPP,
-		TimeLimit:   1000,
-		MemoryLimit: 128,
-		TestCases:   []model.JudgeTestCase{},
-	})
-
-	assert.Equal(t, model.VerdictUKE, result.Verdict)
-	assert.False(t, result.Compile.Succeeded)
-	assert.Contains(t, result.Compile.Log, "at least one testcase is required")
-}
 
 func TestJudgeEngine_SingleTestCase(t *testing.T) {
 	runner := &fakeRunner{runResults: []RunResult{
@@ -373,69 +358,6 @@ func TestJudgeEngine_SingleTestCase(t *testing.T) {
 	assert.Equal(t, 1, result.PassedCount)
 }
 
-func TestJudgeEngine_InvalidRequest(t *testing.T) {
-	engine := newTestJudgeEngine(nil, nil, nil)
-
-	tests := []struct {
-		name   string
-		req    model.JudgeRequest
-		errMsg string
-	}{
-		{
-			name: "empty source code",
-			req: model.JudgeRequest{
-				SourceCode:  "",
-				Language:    model.LanguagePython,
-				TimeLimit:   1000,
-				MemoryLimit: 128,
-				TestCases:   []model.JudgeTestCase{{}},
-			},
-			errMsg: "source code is required",
-		},
-		{
-			name: "unknown language",
-			req: model.JudgeRequest{
-				SourceCode:  "code",
-				Language:    model.LanguageUnknown,
-				TimeLimit:   1000,
-				MemoryLimit: 128,
-				TestCases:   []model.JudgeTestCase{{}},
-			},
-			errMsg: "language is required",
-		},
-		{
-			name: "zero time limit",
-			req: model.JudgeRequest{
-				SourceCode:  "code",
-				Language:    model.LanguagePython,
-				TimeLimit:   0,
-				MemoryLimit: 128,
-				TestCases:   []model.JudgeTestCase{{}},
-			},
-			errMsg: "time limit must be positive",
-		},
-		{
-			name: "negative memory limit",
-			req: model.JudgeRequest{
-				SourceCode:  "code",
-				Language:    model.LanguagePython,
-				TimeLimit:   1000,
-				MemoryLimit: -1,
-				TestCases:   []model.JudgeTestCase{{}},
-			},
-			errMsg: "memory limit must be positive",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := engine.Judge(context.Background(), tt.req)
-			assert.Equal(t, model.VerdictUKE, result.Verdict)
-			assert.False(t, result.Compile.Succeeded)
-			assert.Contains(t, result.Compile.Log, tt.errMsg)
-		})
-	}
-}
 
 func TestJudgeEngine_CheckerCompileFailureReturnsUnknownError(t *testing.T) {
 	compiler := &fakeCompiler{compileResults: []CompileOutput{
