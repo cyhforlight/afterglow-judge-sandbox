@@ -1,3 +1,4 @@
+// Package resource provides read-only access to bundled and external judge resources.
 package resource
 
 import (
