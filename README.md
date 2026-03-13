@@ -105,8 +105,8 @@ curl -X POST http://localhost:8080/v1/execute \
   - 负责完整判题流程编排：加载测试数据、解析 checker、编译、执行、校验、聚合 verdict
 - `sandbox`
   - 负责通过 containerd 在受限环境中执行编译和运行动作
-- `storage`
-  - 负责内部资源和外部文件的只读访问
+- `resource`
+  - 负责内部资源（预置 checker）和外部资源（测试数据、题目自定义 Checker 等）的只读访问
 - `model`
   - 负责领域对象和枚举类型
 
@@ -115,7 +115,7 @@ curl -X POST http://localhost:8080/v1/execute \
 ```text
 transport -> service -> model
                     -> sandbox
-                    -> storage
+                    -> resource
 ```
 
 ### 请求处理流程
