@@ -12,6 +12,9 @@ type throttledRunner struct {
 // NewThrottledRunner wraps inner with a concurrency-limiting semaphore.
 // The sem channel is created and shared by the caller.
 func NewThrottledRunner(inner Runner, sem chan struct{}) Runner {
+	if sem == nil {
+		panic("semaphore channel is required: a nil channel blocks forever")
+	}
 	return &throttledRunner{inner: inner, sem: sem}
 }
 
@@ -41,6 +44,9 @@ type throttledCompiler struct {
 
 // NewThrottledCompiler wraps inner with a concurrency-limiting semaphore.
 func NewThrottledCompiler(inner Compiler, sem chan struct{}) Compiler {
+	if sem == nil {
+		panic("semaphore channel is required: a nil channel blocks forever")
+	}
 	return &throttledCompiler{inner: inner, sem: sem}
 }
 

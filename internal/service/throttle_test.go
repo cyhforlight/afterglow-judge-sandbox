@@ -164,3 +164,15 @@ func TestThrottledRunner_PreflightCheckBypassesSemaphore(t *testing.T) {
 	err := throttled.PreflightCheck(context.Background())
 	assert.NoError(t, err)
 }
+
+func TestNewThrottledRunner_RequiresSemaphore(t *testing.T) {
+	assert.PanicsWithValue(t, "semaphore channel is required: a nil channel blocks forever", func() {
+		NewThrottledRunner(&blockingRunner{unblock: make(chan struct{})}, nil)
+	})
+}
+
+func TestNewThrottledCompiler_RequiresSemaphore(t *testing.T) {
+	assert.PanicsWithValue(t, "semaphore channel is required: a nil channel blocks forever", func() {
+		NewThrottledCompiler(&blockingCompiler{unblock: make(chan struct{})}, nil)
+	})
+}
