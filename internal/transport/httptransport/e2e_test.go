@@ -164,9 +164,13 @@ func newE2EHandler(t *testing.T) *Handler {
 	require.NoError(t, err)
 
 	baseCompiler := service.NewThrottledCompiler(service.NewCompiler(sb), testContainerSem)
+	checkerCompiler := service.NewCachedCompiler(
+		service.NewThrottledCompiler(service.NewCompiler(sb), testContainerSem),
+		compileCache,
+	)
 	baseRunner := service.NewThrottledRunner(service.NewRunner(sb), testContainerSem)
-	judge, err := service.NewJudgeEngine(baseCompiler, baseRunner,
-		bundledResources, externalResources, "default", compileCache)
+	judge, err := service.NewJudgeEngine(baseCompiler, checkerCompiler, baseRunner,
+		bundledResources, externalResources, "default")
 	require.NoError(t, err)
 
 	ctx := context.Background()

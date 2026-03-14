@@ -2,16 +2,12 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
 
-	"golang.org/x/sync/singleflight"
-
-	"afterglow-judge-engine/internal/cache"
 	"afterglow-judge-engine/internal/model"
 	"afterglow-judge-engine/internal/resource"
 	"afterglow-judge-engine/internal/sandbox"
@@ -28,29 +24,22 @@ type JudgeService interface {
 // JudgeEngine implements JudgeService.
 type JudgeEngine struct {
 	compiler        Compiler
+	checkerCompiler Compiler
 	runner          Runner
 	resources       ResourceStore
 	externalStorage ResourceStore
 	defaultChecker  string
-	cache           *cache.Cache
 	log             *slog.Logger
-	checkerGroup    singleflight.Group
-}
-
-// checkerCompileResult bundles the output of a checker compilation for singleflight.
-type checkerCompileResult struct {
-	artifact *model.CompiledArtifact
-	result   model.CompileResult
 }
 
 // NewJudgeEngine creates a judge engine.
 func NewJudgeEngine(
 	compiler Compiler,
+	checkerCompiler Compiler,
 	runner Runner,
 	resources ResourceStore,
 	externalStorage *resource.External,
 	defaultChecker string,
-	cache *cache.Cache,
 ) (*JudgeEngine, error) {
 	if resources == nil {
 		return nil, errors.New("internal resource store is required")
@@ -69,11 +58,11 @@ func NewJudgeEngine(
 	}
 	return &JudgeEngine{
 		compiler:        compiler,
+		checkerCompiler: checkerCompiler,
 		runner:          runner,
 		resources:       resources,
 		externalStorage: externalResourceStore,
 		defaultChecker:  defaultChecker,
-		cache:           cache,
 		log:             slog.Default(),
 	}, nil
 }
@@ -297,13 +286,13 @@ func (s *JudgeEngine) compileUserCode(
 	return compileOut.Artifact, compileOut.Result, nil
 }
 
-// prepareChecker loads, compiles, and caches a checker.
-// Concurrent calls for the same checker source are coalesced via singleflight.
+// prepareChecker loads checker source and testlib.h, then delegates compilation
+// to the checkerCompiler (which handles caching and singleflight internally).
 func (s *JudgeEngine) prepareChecker(
 	ctx context.Context,
 	loc CheckerLocation,
 ) (*model.CompiledArtifact, model.CompileResult, error) {
-	// Load checker source
+	// Load checker source.
 	var checkerSource []byte
 	var err error
 
@@ -323,68 +312,18 @@ func (s *JudgeEngine) prepareChecker(
 		}
 	}
 
-	// Check cache
-	cacheKey := computeCheckerCacheKey(checkerSource)
-	if s.cache != nil {
-		if cached, ok := s.cache.Get(cacheKey); ok {
-			s.log.InfoContext(ctx, "checker cache hit", "key", cacheKey[:16])
-			return &model.CompiledArtifact{
-				Data: cached,
-				Mode: 0755,
-			}, model.CompileResult{Succeeded: true}, nil
-		}
-		s.log.InfoContext(ctx, "checker cache miss", "key", cacheKey[:16])
-	}
-
-	// Coalesce concurrent compilations of the same checker.
-	v, err, _ := s.checkerGroup.Do(cacheKey, func() (any, error) {
-		// Double-check cache: another goroutine may have populated it.
-		if s.cache != nil {
-			if cached, ok := s.cache.Get(cacheKey); ok {
-				s.log.InfoContext(ctx, "checker cache hit after singleflight wait", "key", cacheKey[:16])
-				return checkerCompileResult{
-					artifact: &model.CompiledArtifact{Data: cached, Mode: 0755},
-					result:   model.CompileResult{Succeeded: true},
-				}, nil
-			}
-		}
-
-		return s.compileChecker(ctx, checkerSource, cacheKey)
-	})
-	if err != nil {
-		return nil, model.CompileResult{}, err
-	}
-
-	cr := v.(checkerCompileResult)
-	return cr.artifact, cr.result, nil
-}
-
-// compileChecker compiles checker source and caches the result on success.
-func (s *JudgeEngine) compileChecker(
-	ctx context.Context,
-	checkerSource []byte,
-	cacheKey string,
-) (any, error) {
-	// Load testlib.h
+	// Load testlib.h.
 	testlibHeader, err := s.resources.Get(ctx, testlibHeaderKey)
 	if err != nil {
-		return nil, fmt.Errorf("load %q: %w", testlibHeaderKey, err)
+		return nil, model.CompileResult{}, fmt.Errorf("load %q: %w", testlibHeaderKey, err)
 	}
 
-	// Compile checker
+	// Build compile request and delegate to checkerCompiler.
 	profile := checkerProfile()
-	compileReq := CompileRequest{
+	compileOut, err := s.checkerCompiler.Compile(ctx, CompileRequest{
 		Files: []workspace.File{
-			{
-				Name:    checkerSourceFileName,
-				Content: checkerSource,
-				Mode:    0644,
-			},
-			{
-				Name:    testlibHeaderKey,
-				Content: testlibHeader,
-				Mode:    0644,
-			},
+			{Name: checkerSourceFileName, Content: checkerSource, Mode: 0644},
+			{Name: testlibHeaderKey, Content: testlibHeader, Mode: 0644},
 		},
 		ImageRef:     profile.Compile.ImageRef,
 		Command:      profile.Compile.BuildCommand([]string{checkerSourceFileName}),
@@ -395,24 +334,12 @@ func (s *JudgeEngine) compileChecker(
 			MemoryMB:    profile.Compile.MemoryMB,
 			OutputBytes: sandbox.DefaultCompileOutputLimitBytes,
 		},
-	}
-
-	compileOut, err := s.compiler.Compile(ctx, compileReq)
+	})
 	if err != nil {
-		return nil, err
+		return nil, model.CompileResult{}, err
 	}
 
-	// Cache successful compilation
-	if s.cache != nil && compileOut.Result.Succeeded && compileOut.Artifact != nil {
-		s.cache.Set(cacheKey, compileOut.Artifact.Data)
-	}
-
-	return checkerCompileResult{artifact: compileOut.Artifact, result: compileOut.Result}, nil
-}
-
-func computeCheckerCacheKey(source []byte) string {
-	hash := sha256.Sum256(source)
-	return fmt.Sprintf("checker:%x", hash)
+	return compileOut.Artifact, compileOut.Result, nil
 }
 
 // executeUserCode runs compiled user code with given input and limits.

@@ -80,16 +80,20 @@ func initializeComponents(cfg *config.Config) (service.JudgeService, error) {
 	// 5. Create base compiler and runner primitives, throttled by a shared semaphore.
 	containerSem := make(chan struct{}, cfg.MaxConcurrentContainers)
 	compiler := service.NewThrottledCompiler(service.NewCompiler(sb), containerSem)
+	checkerCompiler := service.NewCachedCompiler(
+		service.NewThrottledCompiler(service.NewCompiler(sb), containerSem),
+		compileCache,
+	)
 	runner := service.NewThrottledRunner(service.NewRunner(sb), containerSem)
 
 	// 6. Create judge engine with internal checker resources.
 	judge, err := service.NewJudgeEngine(
 		compiler,
+		checkerCompiler,
 		runner,
 		bundledResources,
 		externalResources,
 		cfg.DefaultChecker,
-		compileCache,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("initialize judge engine: %w", err)
