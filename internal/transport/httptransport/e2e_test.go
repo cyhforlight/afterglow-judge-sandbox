@@ -156,7 +156,7 @@ func newE2EHandler(t *testing.T) *Handler {
 	sb := sandbox.NewContainerdSandbox("/run/containerd/containerd.sock", "")
 	bundledResources, err := resource.NewBundled()
 	require.NoError(t, err)
-	compileCache, err := cache.New(100)
+	compileCache, err := cache.New[service.CompileOutput](100)
 	require.NoError(t, err)
 
 	testdataDir := filepath.Join(projectRoot(t), "testdata")

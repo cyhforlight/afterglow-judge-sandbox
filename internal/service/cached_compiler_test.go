@@ -25,7 +25,7 @@ func testCompileRequest(content string) CompileRequest {
 }
 
 func TestCachedCompiler_CacheHit(t *testing.T) {
-	c, err := cache.New(16)
+	c, err := cache.New[CompileOutput](16)
 	require.NoError(t, err)
 
 	inner := &fakeCompiler{
@@ -46,7 +46,7 @@ func TestCachedCompiler_CacheHit(t *testing.T) {
 }
 
 func TestCachedCompiler_CacheMiss(t *testing.T) {
-	c, err := cache.New(16)
+	c, err := cache.New[CompileOutput](16)
 	require.NoError(t, err)
 
 	inner := &fakeCompiler{
@@ -63,7 +63,7 @@ func TestCachedCompiler_CacheMiss(t *testing.T) {
 }
 
 func TestCachedCompiler_FailedCompileNotCached(t *testing.T) {
-	c, err := cache.New(16)
+	c, err := cache.New[CompileOutput](16)
 	require.NoError(t, err)
 
 	inner := &fakeCompiler{
@@ -95,7 +95,7 @@ func TestCachedCompiler_NilCachePassthrough(t *testing.T) {
 }
 
 func TestCachedCompiler_Singleflight(t *testing.T) {
-	c, err := cache.New(16)
+	c, err := cache.New[CompileOutput](16)
 	require.NoError(t, err)
 
 	var compileCount atomic.Int32
@@ -131,7 +131,7 @@ func TestCachedCompiler_Singleflight(t *testing.T) {
 }
 
 func TestCachedCompiler_ErrorNotCached(t *testing.T) {
-	c, err := cache.New(16)
+	c, err := cache.New[CompileOutput](16)
 	require.NoError(t, err)
 
 	var calls atomic.Int32
