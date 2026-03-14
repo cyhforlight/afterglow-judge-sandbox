@@ -6,9 +6,8 @@ import (
 	"afterglow-judge-engine/internal/model"
 )
 
-// LanguageProfile defines compilation and execution configuration for a language.
-// This encapsulates language-specific build commands and runtime parameters,
-// fulfilling the role of "Business Logic Layer 2 (Task Encapsulation)" as defined in PRD 3.3.
+// LanguageProfile groups the compile-time and run-time settings for a language.
+// It keeps language-specific images, filenames, and commands in one place.
 type LanguageProfile struct {
 	Compile CompileConfig
 	Run     RunConfig
