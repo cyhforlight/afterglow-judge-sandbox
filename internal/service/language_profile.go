@@ -2,7 +2,6 @@ package service
 
 import (
 	"fmt"
-	"os"
 
 	"afterglow-judge-engine/internal/model"
 )
@@ -30,7 +29,6 @@ type RunConfig struct {
 	ImageRef       string
 	ArtifactName   string
 	RuntimeCommand func(artifactPath string) []string
-	FileMode       os.FileMode
 }
 
 // ProfileForLanguage returns the language profile for the given language.
@@ -72,7 +70,6 @@ func cProfile() LanguageProfile {
 			ImageRef:       "gcr.io/distroless/static-debian12:latest",
 			ArtifactName:   "program",
 			RuntimeCommand: func(p string) []string { return []string{p} },
-			FileMode:       0755,
 		},
 	}
 }
@@ -100,7 +97,6 @@ func cppProfile() LanguageProfile {
 			ImageRef:       "gcr.io/distroless/static-debian12:latest",
 			ArtifactName:   "program",
 			RuntimeCommand: func(p string) []string { return []string{p} },
-			FileMode:       0755,
 		},
 	}
 }
@@ -129,7 +125,6 @@ func checkerProfile() LanguageProfile {
 			ImageRef:       "gcr.io/distroless/static-debian12:latest",
 			ArtifactName:   "checker",
 			RuntimeCommand: func(p string) []string { return []string{p} },
-			FileMode:       0755,
 		},
 	}
 }
@@ -154,7 +149,6 @@ func javaProfile() LanguageProfile {
 			ImageRef:       "gcr.io/distroless/java21-debian12:latest",
 			ArtifactName:   "solution.jar",
 			RuntimeCommand: func(p string) []string { return []string{"java", "-Xmx256m", "-Xms64m", "-jar", p} },
-			FileMode:       0644,
 		},
 	}
 }
@@ -180,7 +174,6 @@ func pythonProfile() LanguageProfile {
 			ImageRef:       "gcr.io/distroless/python3-debian12:latest",
 			ArtifactName:   "solution.pyc",
 			RuntimeCommand: func(p string) []string { return []string{"python3", p} },
-			FileMode:       0644,
 		},
 	}
 }

@@ -20,17 +20,12 @@ func runUserProgram(t *testing.T, env serviceIntegrationEnv, artifact *model.Com
 	profile, err := ProfileForLanguage(lang)
 	require.NoError(t, err)
 
-	programMode := artifact.Mode
-	if programMode == 0 {
-		programMode = profile.Run.FileMode
-	}
-
 	containerPath := runMountDir + "/" + profile.Run.ArtifactName
 	runOut, err := env.runner.Run(env.ctx, RunRequest{
 		Files: []workspace.File{{
 			Name:    profile.Run.ArtifactName,
 			Content: artifact.Data,
-			Mode:    programMode,
+			Mode:    artifact.Mode,
 		}},
 		ImageRef: profile.Run.ImageRef,
 		Command:  profile.Run.RuntimeCommand(containerPath),
