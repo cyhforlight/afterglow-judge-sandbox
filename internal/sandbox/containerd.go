@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -35,6 +36,9 @@ const (
 	pidsLimit                  = 128
 	memoryHitThresholdPermille = 995
 )
+
+// cpuCounter is used for round-robin CPU allocation across all sandbox instances.
+var cpuCounter atomic.Uint32
 
 // ContainerdSandbox implements Sandbox using containerd.
 type ContainerdSandbox struct {
@@ -322,12 +326,15 @@ func generateContainerID() string {
 	return fmt.Sprintf("sandbox-%016x", rand.Uint64()) //nolint:gosec // G404: math/rand/v2 is cryptographically seeded
 }
 
+// pickCPU selects a CPU core using round-robin allocation.
+// This distributes load evenly across all available cores.
 func pickCPU() string {
 	cpuCount := runtime.NumCPU()
 	if cpuCount <= 1 {
 		return "0"
 	}
-	return strconv.Itoa(rand.IntN(cpuCount)) //nolint:gosec // G404: math/rand/v2 is cryptographically seeded
+	cpu := cpuCounter.Add(1) % uint32(cpuCount)
+	return strconv.Itoa(int(cpu))
 }
 
 func sandboxSecurityOpts(enableSeccomp bool) oci.SpecOpts {
