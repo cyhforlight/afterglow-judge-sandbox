@@ -189,7 +189,7 @@ func newTestJudgeEngine(
 			testlibHeaderKey:       []byte("header"),
 		}}
 	}
-	engine := NewJudgeEngine(compiler, compiler, runner, resources, nil)
+	engine := NewJudgeEngine(compiler, compiler, runner, resources, nil, 10)
 	return engine
 }
 

@@ -27,6 +27,7 @@ type JudgeEngine struct {
 	runner          Runner
 	resources       ResourceStore
 	externalStorage ResourceStore
+	concurrencySem  chan struct{}
 }
 
 // NewJudgeEngine creates a judge engine.
@@ -36,6 +37,7 @@ func NewJudgeEngine(
 	runner Runner,
 	resources ResourceStore,
 	externalStorage ResourceStore,
+	maxConcurrent int,
 ) *JudgeEngine {
 	return &JudgeEngine{
 		compiler:        compiler,
@@ -43,6 +45,7 @@ func NewJudgeEngine(
 		runner:          runner,
 		resources:       resources,
 		externalStorage: externalStorage,
+		concurrencySem:  make(chan struct{}, maxConcurrent),
 	}
 }
 
@@ -109,6 +112,18 @@ func (s *JudgeEngine) validateExternalDependency(ctx context.Context, path, labe
 
 // Judge compiles source code and evaluates all test cases.
 func (s *JudgeEngine) Judge(ctx context.Context, req model.JudgeRequest) model.JudgeResult {
+	// Acquire concurrency semaphore with context timeout
+	select {
+	case s.concurrencySem <- struct{}{}:
+		if ctx.Err() != nil {
+			<-s.concurrencySem
+			return failedBeforeRun(req.TestCases, "judge request cancelled or timed out while waiting for capacity")
+		}
+		defer func() { <-s.concurrencySem }()
+	case <-ctx.Done():
+		return failedBeforeRun(req.TestCases, "judge request cancelled or timed out while waiting for capacity")
+	}
+
 	// Resolve checker before compilation so direct callers get early validation.
 	checkerLoc, err := ResolveChecker(req.Checker)
 	if err != nil {

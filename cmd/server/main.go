@@ -99,6 +99,7 @@ func initializeComponents(cfg *config.Config) (service.JudgeService, error) {
 		runner,
 		bundledResources,
 		externalResources,
+		cfg.MaxConcurrentJudges,
 	)
 
 	ctx := context.Background()

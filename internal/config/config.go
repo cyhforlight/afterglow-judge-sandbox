@@ -22,6 +22,7 @@ type Config struct {
 	// Execution Limits
 	MaxInputSizeMB          int
 	MaxConcurrentContainers int
+	MaxConcurrentJudges     int
 	ExternalDataDir         string
 
 	// Security
@@ -69,6 +70,12 @@ func Load() (*Config, error) {
 	}
 	cfg.MaxConcurrentContainers = maxContainers
 
+	maxJudges, err := getEnvInt("MAX_CONCURRENT_JUDGES", 4)
+	if err != nil {
+		return nil, err
+	}
+	cfg.MaxConcurrentJudges = maxJudges
+
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -99,6 +106,9 @@ func (cfg *Config) Validate() error {
 	}
 	if cfg.MaxConcurrentContainers <= 0 {
 		return fmt.Errorf("MAX_CONCURRENT_CONTAINERS must be positive, got %d", cfg.MaxConcurrentContainers)
+	}
+	if cfg.MaxConcurrentJudges <= 0 {
+		return fmt.Errorf("MAX_CONCURRENT_JUDGES must be positive, got %d", cfg.MaxConcurrentJudges)
 	}
 	if cfg.ExternalDataDir == "" {
 		return fmt.Errorf("EXTERNAL_DATA_DIR must not be empty")

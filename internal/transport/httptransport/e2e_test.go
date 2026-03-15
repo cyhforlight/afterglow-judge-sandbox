@@ -170,7 +170,7 @@ func newE2EHandler(t *testing.T) *Handler {
 	)
 	baseRunner := service.NewThrottledRunner(service.NewRunner(sb), testContainerSem)
 	judge := service.NewJudgeEngine(baseCompiler, checkerCompiler, baseRunner,
-		bundledResources, externalResources)
+		bundledResources, externalResources, 10)
 
 	ctx := context.Background()
 	if err := judge.PreflightCheck(ctx); err != nil {
