@@ -106,7 +106,8 @@ func (c *compiler) compileInContainer(ctx context.Context, req CompileRequest) (
 			ContainerPath: compileMountDir,
 			ReadOnly:      false,
 		},
-		Limits: req.Limits,
+		Limits:        req.Limits,
+		EnableSeccomp: false, // Compilation needs fork for shell scripts
 	})
 	if err != nil {
 		return out, fmt.Errorf("execute compilation: %w", err)

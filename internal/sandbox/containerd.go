@@ -17,6 +17,7 @@ import (
 
 	cgroupsv2 "github.com/containerd/cgroups/v3/cgroup2/stats"
 	containerd "github.com/containerd/containerd/v2/client"
+	"github.com/containerd/containerd/v2/core/containers"
 	"github.com/containerd/containerd/v2/pkg/cio"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/containerd/v2/pkg/oci"
@@ -207,7 +208,7 @@ func (s *ContainerdSandbox) executeInContainer(
 	specOpts = append(specOpts,
 		oci.WithMemoryLimit(uint64(memoryLimitBytes)), //nolint:gosec // G115: value is validated
 		oci.WithMemorySwap(memoryLimitBytes),
-		sandboxSecurityOpts(),
+		sandboxSecurityOpts(req.EnableSeccomp),
 	)
 
 	container, err := client.NewContainer(ctx, containerID,
@@ -329,8 +330,8 @@ func pickCPU() string {
 	return strconv.Itoa(rand.IntN(cpuCount)) //nolint:gosec // G404: math/rand/v2 is cryptographically seeded
 }
 
-func sandboxSecurityOpts() oci.SpecOpts {
-	return oci.Compose(
+func sandboxSecurityOpts(enableSeccomp bool) oci.SpecOpts {
+	opts := []oci.SpecOpts{
 		oci.WithRootFSReadonly(),
 		oci.WithMounts([]specs.Mount{{
 			Destination: "/tmp",
@@ -342,7 +343,51 @@ func sandboxSecurityOpts() oci.SpecOpts {
 		oci.WithCapabilities([]string{}),
 		oci.WithNoNewPrivileges,
 		oci.WithPidsLimit(pidsLimit),
-	)
+	}
+
+	if enableSeccomp {
+		opts = append(opts, withJudgeSandboxSeccomp())
+	}
+
+	return oci.Compose(opts...)
+}
+
+// withJudgeSandboxSeccomp applies seccomp restrictions for judge sandbox.
+// It blocks network operations and process creation syscalls while allowing
+// thread creation (clone) needed by JVM and Python interpreters.
+func withJudgeSandboxSeccomp() oci.SpecOpts {
+	return func(_ context.Context, _ oci.Client, _ *containers.Container, s *oci.Spec) error {
+		if s.Linux == nil {
+			s.Linux = &specs.Linux{}
+		}
+
+		// Block dangerous syscalls that user code should not use
+		blockedSyscalls := []string{
+			// Network operations
+			"socket", "bind", "listen", "connect", "accept", "accept4",
+			"sendto", "recvfrom", "sendmsg", "recvmsg",
+
+			// Process creation (keep clone for threads)
+			"fork", "vfork",
+
+			// Other dangerous operations
+			"ptrace",           // Debug other processes
+			"mount", "umount2", // Mount filesystems
+			"reboot", // Reboot system
+		}
+
+		s.Linux.Seccomp = &specs.LinuxSeccomp{
+			DefaultAction: specs.ActAllow,
+			Architectures: []specs.Arch{specs.ArchX86_64, specs.ArchX86},
+			Syscalls: []specs.LinuxSyscall{
+				{
+					Names:  blockedSyscalls,
+					Action: specs.ActErrno,
+				},
+			},
+		}
+		return nil
+	}
 }
 
 type cgroupMetrics struct {

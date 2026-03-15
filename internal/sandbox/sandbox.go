@@ -15,12 +15,13 @@ type Sandbox interface {
 
 // ExecuteRequest contains all parameters needed to run a command in a container.
 type ExecuteRequest struct {
-	ImageRef string
-	Command  []string
-	MountDir *Mount
-	Cwd      *string
-	Stdin    io.Reader
-	Limits   ResourceLimits
+	ImageRef      string
+	Command       []string
+	MountDir      *Mount
+	Cwd           *string
+	Stdin         io.Reader
+	Limits        ResourceLimits
+	EnableSeccomp bool // Enable seccomp restrictions (for user code execution)
 }
 
 // Mount describes a host path to be mounted into the container.

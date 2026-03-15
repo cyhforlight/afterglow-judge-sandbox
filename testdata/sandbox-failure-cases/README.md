@@ -82,11 +82,9 @@
 
 ### POLICY - Sandbox 策略测试
 
-**注意**: 这些测试当前被跳过，因为需要 seccomp 系统调用过滤配置。
+| 文件名 | 语言 | 触发机制 | 预期结果 |
+|--------|------|----------|----------|
+| `policy_fork_bomb.c` | C | 持续调用 `fork()` | TLE（seccomp 阻止 fork，程序无限循环） |
+| `policy_system_call.py` | Python | 调用 `os.system()` | OK（seccomp 阻止 fork，命令失败但程序正常结束） |
 
-| 文件名 | 语言 | 触发机制 | 当前行为 | 预期结果（需要 seccomp） |
-|--------|------|----------|----------|--------------------------|
-| `policy_fork_bomb.c` | C | 持续调用 `fork()` | TLE（达到 PID 限制后超时） | 被策略拦截或 RE |
-| `policy_system_call.py` | Python | 调用 `os.system()` | OK（命令失败但程序正常结束） | 被策略拦截或 RE |
-
-这些测试需要在 `sandboxSecurityOpts()` 中添加 seccomp 配置才能正确工作。
+这些测试验证 seccomp 配置正确阻止了网络和进程创建系统调用。

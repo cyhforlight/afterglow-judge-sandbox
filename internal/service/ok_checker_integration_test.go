@@ -58,4 +58,3 @@ func TestOKAndChecker_AllTestcases(t *testing.T) {
 		})
 	}
 }
-
