@@ -79,13 +79,16 @@ func computeCacheKey(req CompileRequest) string {
 
 	h := sha256.New()
 	for _, f := range sorted {
-		fmt.Fprintf(h, "%s\x00", f.Name)
+		h.Write([]byte(f.Name))
+		h.Write([]byte{0})
 		h.Write(f.Content)
 		h.Write([]byte{0})
 	}
-	fmt.Fprintf(h, "%s\x00", req.ImageRef)
+	h.Write([]byte(req.ImageRef))
+	h.Write([]byte{0})
 	for _, arg := range req.Command {
-		fmt.Fprintf(h, "%s\x00", arg)
+		h.Write([]byte(arg))
+		h.Write([]byte{0})
 	}
 	return fmt.Sprintf("compile:%x", h.Sum(nil))
 }

@@ -125,7 +125,7 @@ func TestCachedCompiler_Singleflight(t *testing.T) {
 	wg.Wait()
 
 	for i, e := range errs {
-		assert.NoError(t, e, "goroutine %d", i)
+		require.NoError(t, e, "goroutine %d", i)
 	}
 	assert.Equal(t, int32(1), compileCount.Load(), "singleflight should coalesce to 1 compile")
 }

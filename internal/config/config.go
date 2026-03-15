@@ -2,6 +2,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -86,20 +87,20 @@ func Load() (*Config, error) {
 // Validate checks that a loaded Config is internally consistent.
 func (cfg *Config) Validate() error {
 	if cfg == nil {
-		return fmt.Errorf("config is required")
+		return errors.New("config is required")
 	}
 
 	if cfg.HTTPAddr == "" {
-		return fmt.Errorf("HTTP_ADDR must not be empty")
+		return errors.New("HTTP_ADDR must not be empty")
 	}
 	if cfg.HTTPPort <= 0 || cfg.HTTPPort > 65535 {
 		return fmt.Errorf("HTTP_PORT must be between 1 and 65535, got %d", cfg.HTTPPort)
 	}
 	if cfg.ContainerdSocket == "" {
-		return fmt.Errorf("CONTAINERD_SOCKET must not be empty")
+		return errors.New("CONTAINERD_SOCKET must not be empty")
 	}
 	if cfg.ContainerdNamespace == "" {
-		return fmt.Errorf("CONTAINERD_NAMESPACE must not be empty")
+		return errors.New("CONTAINERD_NAMESPACE must not be empty")
 	}
 	if cfg.MaxInputSizeMB <= 0 {
 		return fmt.Errorf("MAX_INPUT_SIZE_MB must be positive, got %d", cfg.MaxInputSizeMB)
@@ -111,7 +112,7 @@ func (cfg *Config) Validate() error {
 		return fmt.Errorf("MAX_CONCURRENT_JUDGES must be positive, got %d", cfg.MaxConcurrentJudges)
 	}
 	if cfg.ExternalDataDir == "" {
-		return fmt.Errorf("EXTERNAL_DATA_DIR must not be empty")
+		return errors.New("EXTERNAL_DATA_DIR must not be empty")
 	}
 	if err := validateDirectory("EXTERNAL_DATA_DIR", cfg.ExternalDataDir); err != nil {
 		return err

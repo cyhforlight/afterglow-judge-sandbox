@@ -149,7 +149,7 @@ func TestContainerdSandbox_IOOperations(t *testing.T) {
 			setupMount: nil,
 			script:     "import sys; print(sys.stdin.read(), end='')",
 			stdin:      "test input\n",
-			checkResult: func(t *testing.T, tmpDir string, result ExecuteResult) {
+			checkResult: func(t *testing.T, _ string, result ExecuteResult) {
 				assert.Equal(t, 0, result.ExitCode)
 				assert.Equal(t, VerdictOK, result.Verdict)
 				assert.Contains(t, result.Stdout, "test input")
@@ -163,7 +163,7 @@ func TestContainerdSandbox_IOOperations(t *testing.T) {
 			},
 			script:  "n = int(open('/sandbox/input.txt').read()); print(n * n)",
 			mountRO: true,
-			checkResult: func(t *testing.T, tmpDir string, result ExecuteResult) {
+			checkResult: func(t *testing.T, _ string, result ExecuteResult) {
 				assert.Equal(t, 0, result.ExitCode)
 				assert.Equal(t, VerdictOK, result.Verdict)
 				assert.Contains(t, result.Stdout, "49")

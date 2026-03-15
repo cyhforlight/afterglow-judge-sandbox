@@ -1,3 +1,4 @@
+// Package afterglowjudgeengine embeds internal resources at build time.
 package afterglowjudgeengine
 
 import "embed"

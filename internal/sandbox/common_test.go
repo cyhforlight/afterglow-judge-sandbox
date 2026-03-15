@@ -37,13 +37,13 @@ func newTestSandbox(t *testing.T) *ContainerdSandbox {
 	return NewContainerdSandbox("", "")
 }
 
-// sandboxTestEnv encapsulates common test dependencies
+// sandboxTestEnv encapsulates common test dependencies.
 type sandboxTestEnv struct {
 	sb  *ContainerdSandbox
 	ctx context.Context
 }
 
-// newSandboxTestEnv creates a complete test environment with custom timeout
+// newSandboxTestEnv creates a complete test environment with custom timeout.
 func newSandboxTestEnv(t *testing.T, timeout time.Duration) sandboxTestEnv {
 	t.Helper()
 	requireSandboxIntegrationTest(t)
@@ -54,13 +54,13 @@ func newSandboxTestEnv(t *testing.T, timeout time.Duration) sandboxTestEnv {
 	}
 }
 
-// newStandardSandboxTestEnv creates test environment with 10s timeout (most common)
+// newStandardSandboxTestEnv creates test environment with 10s timeout (most common).
 func newStandardSandboxTestEnv(t *testing.T) sandboxTestEnv {
 	t.Helper()
 	return newSandboxTestEnv(t, 10*time.Second)
 }
 
-// standardLimits returns the most common ResourceLimits configuration
+// standardLimits returns the most common ResourceLimits configuration.
 func standardLimits() ResourceLimits {
 	return ResourceLimits{
 		CPUTimeMs:   1000,
@@ -70,7 +70,7 @@ func standardLimits() ResourceLimits {
 	}
 }
 
-// tightLimits returns limits for testing TLE/MLE scenarios
+// tightLimits returns limits for testing TLE/MLE scenarios.
 func tightLimits(cpuMs, memMB int) ResourceLimits {
 	return ResourceLimits{
 		CPUTimeMs:   cpuMs,
@@ -80,7 +80,7 @@ func tightLimits(cpuMs, memMB int) ResourceLimits {
 	}
 }
 
-// largeLimits returns limits for tests needing more resources
+// largeLimits returns limits for tests needing more resources.
 func largeLimits() ResourceLimits {
 	return ResourceLimits{
 		CPUTimeMs:   5000,

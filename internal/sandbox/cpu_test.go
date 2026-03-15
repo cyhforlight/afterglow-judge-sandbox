@@ -14,7 +14,7 @@ func TestPickCPU_RoundRobin(t *testing.T) {
 
 	// 收集分配的 CPU
 	allocations := make([]int, cpuCount*2)
-	for i := 0; i < len(allocations); i++ {
+	for i := range allocations {
 		cpuStr := pickCPU()
 		cpu, err := strconv.Atoi(cpuStr)
 		if err != nil {
@@ -25,19 +25,19 @@ func TestPickCPU_RoundRobin(t *testing.T) {
 
 	// 验证轮询行为：检查是否覆盖了所有 CPU
 	seen := make(map[int]bool)
-	for i := 0; i < cpuCount; i++ {
+	for i := range cpuCount {
 		seen[allocations[i]] = true
 	}
 
 	// 应该看到所有 CPU（0 到 cpuCount-1）
-	for i := 0; i < cpuCount; i++ {
+	for i := range cpuCount {
 		if !seen[i] {
 			t.Errorf("CPU %d was not allocated in first %d allocations", i, cpuCount)
 		}
 	}
 
 	// 验证循环：第二轮应该与第一轮相同
-	for i := 0; i < cpuCount; i++ {
+	for i := range cpuCount {
 		first := allocations[i]
 		second := allocations[cpuCount+i]
 		if first != second {

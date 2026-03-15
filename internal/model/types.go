@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+const unknownString = "Unknown"
+
 // Language represents a supported programming language.
 type Language int
 
@@ -47,7 +49,7 @@ func (l Language) String() string {
 	case LanguagePython:
 		return "Python"
 	default:
-		return "Unknown"
+		return unknownString
 	}
 }
 
@@ -91,7 +93,7 @@ func (v Verdict) String() string {
 	case VerdictUKE:
 		return "UnknownError"
 	default:
-		return "Unknown"
+		return unknownString
 	}
 }
 
@@ -155,10 +157,11 @@ type JudgeCaseResult struct {
 // JudgeStatus describes whether the judge pipeline itself completed successfully.
 type JudgeStatus int
 
+// Judge status constants.
 const (
 	JudgeStatusOK           JudgeStatus = iota + 1 // all cases evaluated; check per-case verdicts for details
-	JudgeStatusCompileError                         // user code failed to compile
-	JudgeStatusSystemError                          // infrastructure failure prevented evaluation
+	JudgeStatusCompileError                        // user code failed to compile
+	JudgeStatusSystemError                         // infrastructure failure prevented evaluation
 )
 
 func (s JudgeStatus) String() string {
@@ -170,7 +173,7 @@ func (s JudgeStatus) String() string {
 	case JudgeStatusSystemError:
 		return "SystemError"
 	default:
-		return "Unknown"
+		return unknownString
 	}
 }
 

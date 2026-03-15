@@ -15,10 +15,10 @@ import (
 
 // slowRunner wraps a runner and adds artificial delay to track concurrency.
 type slowRunner struct {
-	inner          Runner
-	activeJudges   *atomic.Int32
-	maxObserved    *atomic.Int32
-	delayMs        int
+	inner        Runner
+	activeJudges *atomic.Int32
+	maxObserved  *atomic.Int32
+	delayMs      int
 }
 
 func (r *slowRunner) PreflightCheck(ctx context.Context) error {
@@ -212,6 +212,3 @@ func TestJudgeEngine_ConcurrencyRaceCondition(t *testing.T) {
 	assert.Equal(t, int32(0), executed,
 		"Expected 0 canceled requests to execute, but %d executed (race condition detected)", executed)
 }
-
-
-

@@ -53,8 +53,8 @@ var e2eProblemSuites = []e2eProblemSuite{
 		memoryLimit: 256,
 		codes: []e2eCodeExpectation{
 			{
-				filename:       "code_1_ac.cpp",
-				language:       "C++",
+				filename:      "code_1_ac.cpp",
+				language:      "C++",
 				overallStatus: "OK",
 				caseVerdicts: []e2eVerdictExpectation{
 					{name: "sum1", allowed: []string{"OK"}},
@@ -66,8 +66,8 @@ var e2eProblemSuites = []e2eProblemSuite{
 				passedCount: 5,
 			},
 			{
-				filename:       "code_2_tle.cpp",
-				language:       "C++",
+				filename:      "code_2_tle.cpp",
+				language:      "C++",
 				overallStatus: "OK",
 				caseVerdicts: []e2eVerdictExpectation{
 					{name: "sum1", allowed: []string{"OK"}},
@@ -79,8 +79,8 @@ var e2eProblemSuites = []e2eProblemSuite{
 				passedCount: 4,
 			},
 			{
-				filename:       "code_3_wa_and_tle.cpp",
-				language:       "C++",
+				filename:      "code_3_wa_and_tle.cpp",
+				language:      "C++",
 				overallStatus: "OK",
 				caseVerdicts: []e2eVerdictExpectation{
 					{name: "sum1", allowed: []string{"OK"}},
@@ -92,8 +92,8 @@ var e2eProblemSuites = []e2eProblemSuite{
 				passedCount: 3,
 			},
 			{
-				filename:       "code_4_wa_and_tle.py",
-				language:       "Python",
+				filename:      "code_4_wa_and_tle.py",
+				language:      "Python",
 				overallStatus: "OK",
 				caseVerdicts: []e2eVerdictExpectation{
 					{name: "sum1", allowed: []string{"OK"}},
@@ -105,8 +105,8 @@ var e2eProblemSuites = []e2eProblemSuite{
 				passedCount: 2,
 			},
 			{
-				filename:       "code_5_wa_and_tle.c",
-				language:       "C",
+				filename:      "code_5_wa_and_tle.c",
+				language:      "C",
 				overallStatus: "OK",
 				caseVerdicts: []e2eVerdictExpectation{
 					{name: "sum1", allowed: []string{"OK"}},
